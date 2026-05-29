@@ -232,9 +232,11 @@ def _resolve_target(
     if len(targets) > 1:
         raise ValueError("single-trace analysis currently expects exactly one failure target")
     target = targets[0]
-    if target_span is not None:
-        return FailureTarget(target_id=target.target_id, node_ids=target.node_ids, span=target_span)
-    return target
+    return FailureTarget(
+        target_id=target_id,
+        node_ids=target.node_ids,
+        span=target_span if target_span is not None else target.span,
+    )
 
 
 def _coerce_marker(marker: str | FailureTargetMarker) -> FailureTargetMarker:

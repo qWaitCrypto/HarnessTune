@@ -182,6 +182,51 @@ def test_agentpi_raw_can_enter_analysis_pipeline_with_default_marker() -> None:
     assert result.rankings
 
 
+def test_marker_mode_preserves_caller_target_id() -> None:
+    torch = pytest.importorskip("torch")
+    from agent_tracegrad.analysis import analyze_trace
+
+    @dataclass
+    class LargeTinyBackwardModel:
+        name: str = "tiny-backward-model"
+
+        @property
+        def tokenizer(self):
+            return WhitespaceOffsetTokenizer()
+
+        def tokenize(self, text: str) -> TokenizedOutput:
+            token_count = len(text.split())
+            return TokenizedOutput(
+                input_ids=torch.arange(token_count, dtype=torch.long).unsqueeze(0),
+                attention_mask=torch.ones((1, token_count), dtype=torch.long),
+            )
+
+        def input_embeddings(self, input_ids, *, requires_grad: bool):
+            embeddings = torch.nn.functional.one_hot(input_ids, num_classes=256).to(torch.float32)
+            embeddings = embeddings.detach().clone()
+            if requires_grad:
+                embeddings.requires_grad_(True)
+            return embeddings
+
+        def forward(self, inputs_embeds, attention_mask):
+            del attention_mask
+            return ModelForwardOutput(logits=inputs_embeds * 2.0)
+
+        def chat_template_supported(self) -> bool:
+            return False
+
+    result = analyze_trace(
+        make_agentpi_raw(),
+        input_format="agentpi-raw",
+        target_marker="last-agent-output",
+        target_id="custom-target",
+        model=LargeTinyBackwardModel(),
+    )
+
+    assert result.target.target_id == "custom-target"
+    assert result.attribution.target_id == "custom-target"
+
+
 def test_agentpi_node_ids_use_message_index_when_turn_idx_repeats() -> None:
     raw_trace = make_agentpi_raw()
     messages = raw_trace["simulation"]["messages"]  # type: ignore[index]
