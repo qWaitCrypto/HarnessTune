@@ -42,6 +42,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     analyze.add_argument("--execution-model-name", default=None, help="Optional execution model identity.")
     analyze.add_argument("--device", default=None, help="Torch device passed to the HF adapter, for example cuda:0.")
+    analyze.add_argument(
+        "--devices",
+        default=None,
+        help="Comma-separated CUDA devices for model sharding, for example cuda:0,cuda:1.",
+    )
     analyze.add_argument("--dtype", choices=("float16", "bfloat16", "float32"), default=None)
     analyze.add_argument("--ig-steps", type=int, default=16, help="Integrated-gradient steps when selected.")
     analyze.add_argument("--topk-mean-k", type=int, default=5, help="k for the topk_mean aggregation view.")
@@ -76,6 +81,7 @@ def _run_analyze(args: argparse.Namespace) -> None:
     model = HuggingFaceCausalLMAdapter.from_pretrained(
         args.model,
         device=args.device,
+        devices=args.devices,
         dtype=dtype,
         model_kwargs=model_kwargs,
         tokenizer_kwargs=tokenizer_kwargs,

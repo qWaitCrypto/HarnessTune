@@ -175,7 +175,8 @@ def _target_loss(logits, input_ids, target: FailureTarget, trace: SerializedTrac
     for position in positions:
         if position == 0:
             continue
-        losses.append(F.cross_entropy(logits[:, position - 1, :], input_ids[:, position], reduction="none"))
+        target_ids = input_ids[:, position].to(logits.device)
+        losses.append(F.cross_entropy(logits[:, position - 1, :], target_ids, reduction="none"))
     if not losses:
         raise ValueError("failure target must contain at least one token position with predecessor context")
     return -sum(losses).mean()

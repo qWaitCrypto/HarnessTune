@@ -19,6 +19,8 @@ def test_cli_analyze_parser_accepts_single_trace_arguments() -> None:
             "out.json",
             "--device",
             "cuda:0",
+            "--devices",
+            "cuda:0,cuda:1",
             "--dtype",
             "bfloat16",
         ]
@@ -28,6 +30,7 @@ def test_cli_analyze_parser_accepts_single_trace_arguments() -> None:
     assert args.input_format == "json-fixture"
     assert args.target_node_id == ["agent-1"]
     assert args.device == "cuda:0"
+    assert args.devices == "cuda:0,cuda:1"
 
 
 def test_cli_analyze_parser_accepts_agentpi_marker_mode() -> None:

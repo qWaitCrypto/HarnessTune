@@ -19,6 +19,7 @@ dev = [
   "pytest>=8.0",
 ]
 gradient = [
+  "accelerate>=0.26",
   "captum>=0.7",
   "torch",
   "transformers>=4.53",
