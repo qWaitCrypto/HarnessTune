@@ -13,6 +13,7 @@ from agent_tracegrad.analysis.single_trace import (
     SingleTraceAnalysisResult,
     analysis_to_dict,
     analyze_normalized_trace,
+    analyze_trace,
     write_analysis_json,
 )
 
@@ -27,6 +28,7 @@ __all__ = [
     "aggregate_attribution",
     "analysis_to_dict",
     "analyze_normalized_trace",
+    "analyze_trace",
     "rank_distribution",
     "write_analysis_json",
 ]

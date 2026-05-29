@@ -18,8 +18,11 @@ from agent_tracegrad.attribution.gradient import (
 from agent_tracegrad.attribution.method import AttributionMethod
 from agent_tracegrad.attribution.result import AttributionResult
 from agent_tracegrad.model.adapter import ModelAdapter
+from agent_tracegrad.target.marker import FailureTargetMarker
+from agent_tracegrad.target.registry import get_failure_target_marker
 from agent_tracegrad.target.schema import FailureTarget
-from agent_tracegrad.trace.json_adapter import JsonTraceAdapter
+from agent_tracegrad.trace.adapter import TraceAdapter
+from agent_tracegrad.trace.registry import get_trace_adapter
 from agent_tracegrad.trace.schema import SerializedTrace
 from agent_tracegrad.trace.serializer import TraceSerializer
 
@@ -67,10 +70,63 @@ def analyze_normalized_trace(
 ) -> SingleTraceAnalysisResult:
     """Run the single-sample TraceGrad path over a normalized trace payload."""
 
-    nodes = JsonTraceAdapter().adapt(raw_trace)
+    return analyze_trace(
+        raw_trace,
+        input_format="json-fixture",
+        target_node_ids=target_node_ids,
+        model=model,
+        tokenizer=tokenizer,
+        method=method,
+        execution_model_name=execution_model_name,
+        target_id=target_id,
+        target_span=target_span,
+        topk_mean_k=topk_mean_k,
+        ranking_grain=ranking_grain,
+        ranking_view=ranking_view,
+        integrated_gradients_steps=integrated_gradients_steps,
+        trace_metadata=trace_metadata,
+    )
+
+
+def analyze_trace(
+    raw_trace: Any,
+    *,
+    input_format: str = "json-fixture",
+    target_node_ids: Sequence[str] | None = None,
+    target_marker: str | FailureTargetMarker | None = None,
+    model: ModelAdapter,
+    tokenizer: Any | None = None,
+    method: str = "gradient_saliency",
+    execution_model_name: str | None = None,
+    target_id: str = "target-1",
+    target_span: tuple[int, int] | None = None,
+    topk_mean_k: int = 5,
+    ranking_grain: str = "node",
+    ranking_view: str = "sum",
+    integrated_gradients_steps: int = 16,
+    trace_metadata: Mapping[str, Any] | None = None,
+    adapter: TraceAdapter | None = None,
+) -> SingleTraceAnalysisResult:
+    """Run the single-sample TraceGrad path over any registered trace format."""
+
+    trace_adapter = adapter or get_trace_adapter(input_format)
+    nodes = trace_adapter.adapt(raw_trace)
     serializer = TraceSerializer(tokenizer or model.tokenizer)
-    trace = serializer.serialize(nodes, metadata=trace_metadata)
-    target = FailureTarget(target_id=target_id, node_ids=target_node_ids, span=target_span)
+    trace = serializer.serialize(
+        nodes,
+        metadata={
+            **dict(trace_metadata or {}),
+            "input_format": input_format,
+            "trace_adapter": trace_adapter.name,
+        },
+    )
+    target = _resolve_target(
+        trace,
+        target_node_ids=target_node_ids,
+        target_marker=target_marker,
+        target_id=target_id,
+        target_span=target_span,
+    )
     target.validate_against_trace(trace)
     attribution_method = _build_method(
         method,
@@ -99,6 +155,8 @@ def analyze_normalized_trace(
             "ranking_grain": ranking_grain,
             "ranking_view": ranking_view,
             "topk_mean_k": topk_mean_k,
+            "input_format": input_format,
+            "trace_adapter": trace_adapter.name,
         },
     )
 
@@ -155,6 +213,34 @@ def _build_method(
         "unknown attribution method "
         f"{method!r}; expected gradient_saliency, gradient_times_input, or integrated_gradients"
     )
+
+
+def _resolve_target(
+    trace: SerializedTrace,
+    *,
+    target_node_ids: Sequence[str] | None,
+    target_marker: str | FailureTargetMarker | None,
+    target_id: str,
+    target_span: tuple[int, int] | None,
+) -> FailureTarget:
+    if target_node_ids:
+        return FailureTarget(target_id=target_id, node_ids=target_node_ids, span=target_span)
+    marker = _coerce_marker(target_marker or "last-agent-output")
+    targets = tuple(marker.mark(trace))
+    if not targets:
+        raise ValueError(f"failure target marker {marker.name!r} did not produce any targets")
+    if len(targets) > 1:
+        raise ValueError("single-trace analysis currently expects exactly one failure target")
+    target = targets[0]
+    if target_span is not None:
+        return FailureTarget(target_id=target.target_id, node_ids=target.node_ids, span=target_span)
+    return target
+
+
+def _coerce_marker(marker: str | FailureTargetMarker) -> FailureTargetMarker:
+    if isinstance(marker, str):
+        return get_failure_target_marker(marker)
+    return marker
 
 
 def _require_distribution(
