@@ -74,6 +74,9 @@ docs/_build/
 # PyBuilder
 .pybuilder/
 target/
+!agent_tracegrad/target/
+!agent_tracegrad/target/__init__.py
+!agent_tracegrad/target/schema.py
 
 # Jupyter Notebook
 .ipynb_checkpoints
