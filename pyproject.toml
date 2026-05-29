@@ -1,0 +1,36 @@
+[build-system]
+requires = ["hatchling>=1.26"]
+build-backend = "hatchling.build"
+
+[project]
+name = "agent-tracegrad"
+version = "0.1.0"
+description = "Evaluation-first gradient attribution for structured LLM agent traces."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { file = "LICENSE" }
+authors = [
+  { name = "HarnessTune contributors" }
+]
+dependencies = []
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0",
+]
+gradient = [
+  "captum>=0.7",
+  "torch",
+  "transformers>=4.53",
+]
+
+[project.scripts]
+agent-tracegrad = "agent_tracegrad.cli:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-q"
+
+[tool.hatch.build.targets.wheel]
+packages = ["agent_tracegrad"]

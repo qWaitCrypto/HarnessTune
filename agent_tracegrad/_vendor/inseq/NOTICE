@@ -1,0 +1,15 @@
+Vendored Inseq subset
+
+Upstream project: https://github.com/inseq-team/inseq
+Upstream license: Apache License 2.0, preserved in LICENSE.
+
+Local source used for this vendor import:
+- Path: /mnt/d/Inseq
+- Version: 0.7.1
+- Git describe: v0.7.1-2-ga269ee8
+- Git commit: a269ee8fbc65f9079109856e0f995e39a6333a8b
+
+This differs from the earlier planned snapshot commit recorded in
+docs/decisions/0003-inseq-integration-mode.md. The local source is still
+version 0.7.1, but the exact imported commit is recorded here as the source of
+truth for this vendor import.
