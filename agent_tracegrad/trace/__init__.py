@@ -2,6 +2,7 @@
 
 from agent_tracegrad.trace.adapter import TraceAdapter
 from agent_tracegrad.trace.agentpi_adapter import AgentPIRawTraceAdapter
+from agent_tracegrad.trace.ingest import ingest_trace
 from agent_tracegrad.trace.json_adapter import JsonTraceAdapter
 from agent_tracegrad.trace.registry import get_trace_adapter, trace_adapter_names
 from agent_tracegrad.trace.schema import (
@@ -29,6 +30,7 @@ __all__ = [
     "TraceAdapter",
     "TraceSerializer",
     "TraceNode",
+    "ingest_trace",
     "get_trace_adapter",
     "trace_adapter_names",
     "validate_block_role",

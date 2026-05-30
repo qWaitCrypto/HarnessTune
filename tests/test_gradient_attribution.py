@@ -10,7 +10,7 @@ from agent_tracegrad.attribution import (
     IntegratedGradientsAttribution,
 )
 from agent_tracegrad.model.adapter import ModelForwardOutput, TokenizedOutput
-from agent_tracegrad.target import FailureTarget
+from agent_tracegrad.target import ExpectedTarget, FailureTarget, TargetObjective
 from agent_tracegrad.trace import JsonTraceAdapter, TraceSerializer
 
 torch = pytest.importorskip("torch")
@@ -60,6 +60,12 @@ class FakeGradientModel:
         return False
 
 
+class ContextualFakeGradientModel(FakeGradientModel):
+    def forward(self, inputs_embeds, attention_mask):
+        del attention_mask
+        return ModelForwardOutput(logits=inputs_embeds.cumsum(dim=1))
+
+
 def make_trace():
     nodes = JsonTraceAdapter().adapt(
         [
@@ -103,6 +109,37 @@ def test_gradient_saliency_produces_scores_and_zeros_agent_span() -> None:
     assert result.same_model is True
     assert len(result.token_scores) == 5
     assert result.token_scores[2] > 0
+    assert result.token_scores[3:] == (0.0, 0.0)
+
+
+def test_gradient_saliency_supports_expected_action_objective() -> None:
+    trace = make_trace()
+    objective = TargetObjective.expected_action(
+        ExpectedTarget(target_id="gold-refusal", content="five six", source="human")
+    )
+
+    result = GradientSaliencyAttribution().attribute_objective(trace, objective, ContextualFakeGradientModel())
+
+    assert result.target_id == "gold-refusal"
+    assert result.metadata["objective_type"] == "expected_action"
+    assert result.metadata["objective"]["expected_target"]["content"] == "five six"
+    assert len(result.token_scores) == 5
+    assert result.token_scores[0] > 0
+    assert result.token_scores[3:] == (0.0, 0.0)
+
+
+def test_gradient_saliency_supports_contrastive_objective() -> None:
+    trace = make_trace()
+    bad = FailureTarget("bad-transfer", ("agent-1",))
+    expected = ExpectedTarget(target_id="gold-refusal", content="five six")
+    objective = TargetObjective.contrastive(bad, expected)
+
+    result = GradientSaliencyAttribution().attribute_objective(trace, objective, ContextualFakeGradientModel())
+
+    assert result.target_id == "bad-transfer:vs:gold-refusal"
+    assert result.metadata["objective_type"] == "contrastive"
+    assert result.metadata["objective_formula"] == "log P(bad_target | context) - log P(expected_target | context)"
+    assert len(result.token_scores) == 5
     assert result.token_scores[3:] == (0.0, 0.0)
 
 

@@ -32,8 +32,48 @@ def truncate(node: TraceNode, parameters: Mapping[str, Any], tokenizer: OffsetTo
     return node.content[:end_char]
 
 
+def contradict_downstream(node: TraceNode, parameters: Mapping[str, Any], tokenizer: OffsetTokenizer) -> str:
+    del tokenizer
+    original = parameters.get("original")
+    replacement = parameters.get("replacement")
+    if not isinstance(original, str) or not original:
+        raise ValueError("contradict_downstream requires non-empty string parameter 'original'")
+    if not isinstance(replacement, str) or not replacement:
+        raise ValueError("contradict_downstream requires non-empty string parameter 'replacement'")
+    if original == replacement:
+        raise ValueError("contradict_downstream requires distinct 'original' and 'replacement' parameters")
+    if original not in node.content:
+        raise ValueError("contradict_downstream original text was not found in target node content")
+    return node.content.replace(original, replacement, 1)
+
+
+def inject_unrelated_content(node: TraceNode, parameters: Mapping[str, Any], tokenizer: OffsetTokenizer) -> str:
+    del tokenizer
+    content = parameters.get("content")
+    if not isinstance(content, str) or not content:
+        raise ValueError("inject_unrelated_content requires non-empty string parameter 'content'")
+    separator = parameters.get("separator", "\n")
+    if not isinstance(separator, str):
+        raise ValueError("inject_unrelated_content parameter 'separator' must be a string")
+    return f"{node.content}{separator}{content}"
+
+
+def swap_between_instances(node: TraceNode, parameters: Mapping[str, Any], tokenizer: OffsetTokenizer) -> str:
+    del tokenizer
+    replacements = parameters.get("replacements")
+    if not isinstance(replacements, Mapping):
+        raise ValueError("swap_between_instances requires mapping parameter 'replacements'")
+    replacement = replacements.get(node.node_id)
+    if not isinstance(replacement, str):
+        raise ValueError(f"swap_between_instances missing string replacement for node {node.node_id!r}")
+    return replacement
+
+
 OPERATORS: Mapping[str, PerturbationOperator] = {
+    "contradict_downstream": contradict_downstream,
+    "inject_unrelated_content": inject_unrelated_content,
     "replace_with_placeholder": replace_with_placeholder,
+    "swap_between_instances": swap_between_instances,
     "truncate": truncate,
 }
 

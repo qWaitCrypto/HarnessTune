@@ -19,6 +19,7 @@ from agent_tracegrad.attribution.method import AttributionMethod
 from agent_tracegrad.attribution.result import AttributionResult
 from agent_tracegrad.model.adapter import ModelAdapter
 from agent_tracegrad.target.marker import FailureTargetMarker
+from agent_tracegrad.target.objective import TargetObjective, target_objective_to_dict
 from agent_tracegrad.target.registry import get_failure_target_marker
 from agent_tracegrad.target.schema import FailureTarget
 from agent_tracegrad.trace.adapter import TraceAdapter
@@ -45,6 +46,7 @@ class SingleTraceAnalysisResult:
     distributions: Sequence[AttributionDistribution]
     rankings: Sequence[AnalysisRanking]
     metadata: Mapping[str, Any]
+    objective: TargetObjective | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "distributions", tuple(self.distributions))
@@ -94,6 +96,7 @@ def analyze_trace(
     input_format: str = "json-fixture",
     target_node_ids: Sequence[str] | None = None,
     target_marker: str | FailureTargetMarker | None = None,
+    objective: TargetObjective | None = None,
     model: ModelAdapter,
     tokenizer: Any | None = None,
     method: str = "gradient_saliency",
@@ -128,12 +131,14 @@ def analyze_trace(
         target_span=target_span,
     )
     target.validate_against_trace(trace)
+    resolved_objective = _resolve_objective(objective, target)
+    resolved_objective.validate_against_trace(trace)
     attribution_method = _build_method(
         method,
         execution_model_name=execution_model_name,
         integrated_gradients_steps=integrated_gradients_steps,
     )
-    attribution = attribution_method.attribute(trace, target, model)
+    attribution = attribution_method.attribute_objective(trace, resolved_objective, model)
     distributions = aggregate_attribution(trace, attribution, topk=topk_mean_k)
     rankings = tuple(
         AnalysisRanking(
@@ -157,7 +162,9 @@ def analyze_trace(
             "topk_mean_k": topk_mean_k,
             "input_format": input_format,
             "trace_adapter": trace_adapter.name,
+            "objective_type": resolved_objective.objective_type,
         },
+        objective=resolved_objective,
     )
 
 
@@ -179,6 +186,7 @@ def analysis_to_dict(result: SingleTraceAnalysisResult) -> dict[str, Any]:
             "node_ids": list(result.target.node_ids),
             "span": list(result.target.span) if result.target.span is not None else None,
         },
+        "objective": target_objective_to_dict(result.objective) if result.objective is not None else None,
         "attribution": {
             "method_name": result.attribution.method_name,
             "attribution_model_name": result.attribution.attribution_model_name,
@@ -243,6 +251,26 @@ def _coerce_marker(marker: str | FailureTargetMarker) -> FailureTargetMarker:
     if isinstance(marker, str):
         return get_failure_target_marker(marker)
     return marker
+
+
+def _resolve_objective(objective: TargetObjective | None, target: FailureTarget) -> TargetObjective:
+    if objective is None:
+        return TargetObjective.bad_action(target)
+    if objective.bad_target is not None:
+        return objective
+    if objective.objective_type == "contrastive" and objective.expected_target is not None:
+        return TargetObjective.contrastive(
+            target,
+            objective.expected_target,
+            objective_id=objective.objective_id,
+            source=objective.source,
+            metadata={
+                key: value
+                for key, value in dict(objective.metadata).items()
+                if key != "requires_resolved_bad_target"
+            },
+        )
+    return objective
 
 
 def _require_distribution(

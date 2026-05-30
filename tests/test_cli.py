@@ -1,6 +1,62 @@
 from __future__ import annotations
 
-from agent_tracegrad.cli import build_parser
+import json
+from dataclasses import dataclass
+
+import pytest
+
+from agent_tracegrad.cli import build_parser, main
+from agent_tracegrad.model.adapter import ModelForwardOutput, TokenizedOutput
+
+
+class WhitespaceOffsetTokenizer:
+    name_or_path = "whitespace-offset-tokenizer"
+
+    def __call__(self, text: str, *, return_offsets_mapping: bool, add_special_tokens: bool) -> dict[str, object]:
+        assert return_offsets_mapping is True
+        assert add_special_tokens is False
+        offsets: list[tuple[int, int]] = []
+        position = 0
+        for part in text.split():
+            start = text.index(part, position)
+            end = start + len(part)
+            offsets.append((start, end))
+            position = end
+        return {"offset_mapping": offsets}
+
+
+@dataclass
+class FakeCliModel:
+    name: str = "fake-cli-model"
+
+    @property
+    def tokenizer(self):
+        return WhitespaceOffsetTokenizer()
+
+    def tokenize(self, text: str) -> TokenizedOutput:
+        import torch
+
+        token_count = len(text.split())
+        return TokenizedOutput(
+            input_ids=torch.arange(token_count, dtype=torch.long).unsqueeze(0),
+            attention_mask=torch.ones((1, token_count), dtype=torch.long),
+        )
+
+    def input_embeddings(self, input_ids, *, requires_grad: bool):
+        import torch
+
+        embeddings = torch.nn.functional.one_hot(input_ids, num_classes=256).to(torch.float32)
+        embeddings = embeddings.detach().clone()
+        if requires_grad:
+            embeddings.requires_grad_(True)
+        return embeddings
+
+    def forward(self, inputs_embeds, attention_mask):
+        del attention_mask
+        return ModelForwardOutput(logits=inputs_embeds.cumsum(dim=1))
+
+    def chat_template_supported(self) -> bool:
+        return False
 
 
 def test_cli_analyze_parser_accepts_single_trace_arguments() -> None:
@@ -56,3 +112,120 @@ def test_cli_analyze_parser_accepts_agentpi_marker_mode() -> None:
     assert args.input_format == "agentpi-raw"
     assert args.target_node_id is None
     assert args.target_marker == "last-agent-output"
+
+
+def test_cli_evaluate_parser_accepts_objective_and_operator_args() -> None:
+    parser = build_parser()
+
+    args = parser.parse_args(
+        [
+            "evaluate",
+            "--trace",
+            "trace.json",
+            "--input-format",
+            "agentpi-raw",
+            "--model",
+            "/models/formal",
+            "--target-marker",
+            "last-agent-output",
+            "--objective-type",
+            "contrastive",
+            "--expected-target-text",
+            "I cannot do that.",
+            "--operator-config",
+            '{"operator":"replace_with_placeholder","parameters":{"placeholder":"masked"}}',
+            "--output-dir",
+            "out",
+            "--metric-k",
+            "1",
+            "--metric-k",
+            "3",
+            "--ablation-k",
+            "1",
+            "--ablation-k",
+            "2",
+        ]
+    )
+
+    assert args.command == "evaluate"
+    assert args.objective_type == "contrastive"
+    assert args.expected_target_text == "I cannot do that."
+    assert args.metric_k == [1, 3]
+    assert args.ablation_k == [1, 2]
+
+
+def test_cli_evaluate_writes_artifacts(tmp_path, monkeypatch) -> None:
+    pytest.importorskip("torch")
+    trace_path = tmp_path / "trace.json"
+    output_dir = tmp_path / "out"
+    trace_path.write_text(
+        json.dumps(
+            {
+                "nodes": [
+                    {
+                        "node_id": "sys-1",
+                        "block_role": "system",
+                        "sub_block_kind": "system.instruction",
+                        "content": "policy text",
+                        "sequence_index": 0,
+                    },
+                    {
+                        "node_id": "user-1",
+                        "block_role": "user",
+                        "sub_block_kind": "user.content",
+                        "content": "user clue",
+                        "sequence_index": 1,
+                    },
+                    {
+                        "node_id": "agent-1",
+                        "block_role": "agent",
+                        "sub_block_kind": "agent.content",
+                        "content": "wrong answer",
+                        "sequence_index": 2,
+                    },
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(
+        "agent_tracegrad.cli.HuggingFaceCausalLMAdapter.from_pretrained",
+        lambda *args, **kwargs: FakeCliModel(),
+    )
+
+    exit_code = main(
+        [
+            "evaluate",
+            "--trace",
+            str(trace_path),
+            "--model",
+            "fake-model",
+            "--target-node-id",
+            "agent-1",
+            "--objective-type",
+            "expected_action",
+            "--expected-target-text",
+            "right answer",
+            "--operator-config",
+            '{"operator":"replace_with_placeholder","parameters":{"placeholder":"masked"}}',
+            "--output-dir",
+            str(output_dir),
+            "--output-prefix",
+            "eval",
+            "--max-samples",
+            "1",
+            "--metric-k",
+            "1",
+            "--ablation-k",
+            "1",
+        ]
+    )
+
+    assert exit_code == 0
+    assert (output_dir / "eval.json").exists()
+    assert (output_dir / "eval.jsonl").exists()
+    assert (output_dir / "eval.md").exists()
+    payload = json.loads((output_dir / "eval.json").read_text(encoding="utf-8"))
+    assert payload["context"]["objective"]["objective_type"] == "expected_action"
+    assert payload["ablation_curve"]
