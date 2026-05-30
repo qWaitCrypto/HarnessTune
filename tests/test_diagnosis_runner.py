@@ -1,0 +1,294 @@
+"""Tests for the multi-objective diagnosis runner."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+from agent_tracegrad.diagnosis import (
+    DiagnosisResult,
+    diagnosis_to_dict,
+    run_diagnosis,
+)
+from agent_tracegrad.model.adapter import ModelForwardOutput, TokenizedOutput
+
+import pytest
+
+torch = pytest.importorskip("torch")
+
+
+@dataclass
+class TinyBackwardModel:
+    name: str = "tiny-backward-model"
+
+    @property
+    def tokenizer(self):
+        return WhitespaceOffsetTokenizer()
+
+    def tokenize(self, text: str) -> TokenizedOutput:
+        token_count = len(text.split())
+        return TokenizedOutput(
+            input_ids=torch.arange(token_count, dtype=torch.long).unsqueeze(0),
+            attention_mask=torch.ones((1, token_count), dtype=torch.long),
+        )
+
+    def input_embeddings(self, input_ids, *, requires_grad: bool):
+        embeddings = torch.nn.functional.one_hot(input_ids, num_classes=16).to(torch.float32)
+        embeddings = embeddings.detach().clone()
+        if requires_grad:
+            embeddings.requires_grad_(True)
+        return embeddings
+
+    def forward(self, inputs_embeds, attention_mask):
+        del attention_mask
+        return ModelForwardOutput(logits=inputs_embeds * 2.0)
+
+    def chat_template_supported(self) -> bool:
+        return False
+
+
+class WhitespaceOffsetTokenizer:
+    name_or_path = "whitespace-offset-tokenizer"
+
+    def __call__(self, text: str, *, return_offsets_mapping: bool, add_special_tokens: bool):
+        assert return_offsets_mapping is True
+        assert add_special_tokens is False
+        offsets: list[tuple[int, int]] = []
+        position = 0
+        for part in text.split():
+            start = text.index(part, position)
+            end = start + len(part)
+            offsets.append((start, end))
+            position = end
+        return {"offset_mapping": offsets}
+
+
+def _make_raw_trace():
+    return {
+        "nodes": [
+            {
+                "node_id": "sys-1",
+                "block_role": "system",
+                "sub_block_kind": "system.instruction",
+                "content": "zero one",
+                "sequence_index": 0,
+            },
+            {
+                "node_id": "user-1",
+                "block_role": "user",
+                "sub_block_kind": "user.content",
+                "content": "two",
+                "sequence_index": 1,
+            },
+            {
+                "node_id": "agent-1",
+                "block_role": "agent",
+                "sub_block_kind": "agent.content",
+                "content": "three four",
+                "sequence_index": 2,
+            },
+        ]
+    }
+
+
+class TestBadActionOnly:
+    def test_returns_bad_result_only(self) -> None:
+        result = run_diagnosis(
+            _make_raw_trace(),
+            model=TinyBackwardModel(),
+            target_node_ids=("agent-1",),
+        )
+
+        assert isinstance(result, DiagnosisResult)
+        assert result.bad_result is not None
+        assert result.expected_result is None
+        assert result.contrastive_result is None
+        assert result.margin_distributions == ()
+        assert result.metadata["mode"] == "bad_action_only"
+
+    def test_bad_result_has_attribution_scores(self) -> None:
+        result = run_diagnosis(
+            _make_raw_trace(),
+            model=TinyBackwardModel(),
+            target_node_ids=("agent-1",),
+        )
+
+        assert len(result.bad_result.attribution.token_scores) == 5
+        assert result.bad_result.attribution.token_scores[3:] == (0.0, 0.0)
+
+
+class TestFullDiagnosis:
+    def test_all_three_results_present(self) -> None:
+        result = run_diagnosis(
+            _make_raw_trace(),
+            model=TinyBackwardModel(),
+            target_node_ids=("agent-1",),
+            expected_target_text="five six",
+        )
+
+        assert result.bad_result is not None
+        assert result.expected_result is not None
+        assert result.contrastive_result is not None
+        assert result.metadata["mode"] == "full_diagnosis"
+
+    def test_margin_distributions_cover_all_grain_view_pairs(self) -> None:
+        result = run_diagnosis(
+            _make_raw_trace(),
+            model=TinyBackwardModel(),
+            target_node_ids=("agent-1",),
+            expected_target_text="five six",
+        )
+
+        keys = {(md.grain, md.view_name) for md in result.margin_distributions}
+        assert ("node", "sum") in keys
+        assert ("sub_block_kind", "sum") in keys
+
+    def test_margin_instance_ids_align_with_bad_result(self) -> None:
+        result = run_diagnosis(
+            _make_raw_trace(),
+            model=TinyBackwardModel(),
+            target_node_ids=("agent-1",),
+            expected_target_text="five six",
+        )
+
+        node_sum = next(
+            md for md in result.margin_distributions
+            if md.grain == "node" and md.view_name == "sum"
+        )
+        margin_ids = {c.instance_id for c in node_sum.contributions}
+        bad_ids = {
+            inst.instance_id
+            for dist in result.bad_result.distributions
+            if dist.grain == "node"
+            for inst in dist.instances
+        }
+        assert margin_ids >= bad_ids
+
+    def test_margin_uses_contrastive_result_scores(self) -> None:
+        result = run_diagnosis(
+            _make_raw_trace(),
+            model=TinyBackwardModel(),
+            target_node_ids=("agent-1",),
+            expected_target_text="five six",
+        )
+
+        node_sum = next(
+            md for md in result.margin_distributions
+            if md.grain == "node" and md.view_name == "sum"
+        )
+        contrastive_sum = next(
+            dist for dist in result.contrastive_result.distributions
+            if dist.grain == "node" and dist.view_name == "sum"
+        )
+        contrastive_by_id = {
+            inst.instance_id: inst.views["sum"]
+            for inst in contrastive_sum.instances
+        }
+        for contribution in node_sum.contributions:
+            assert contribution.margin == contrastive_by_id[contribution.instance_id]
+
+
+class TestComponentClassification:
+    def test_classifications_are_valid_values(self) -> None:
+        result = run_diagnosis(
+            _make_raw_trace(),
+            model=TinyBackwardModel(),
+            target_node_ids=("agent-1",),
+            expected_target_text="five six",
+        )
+
+        node_sum = next(
+            md for md in result.margin_distributions
+            if md.grain == "node" and md.view_name == "sum"
+        )
+        for contribution in node_sum.contributions:
+            assert contribution.classification in ("preserve", "narrow", "strengthen")
+
+    def test_positive_margin_is_narrow(self) -> None:
+        from agent_tracegrad.diagnosis.runner import _classify_component
+
+        assert _classify_component(margin=1.0, expected_score=0.5, max_abs_margin=2.0, threshold=0.1) == "narrow"
+
+    def test_negative_margin_is_preserve(self) -> None:
+        from agent_tracegrad.diagnosis.runner import _classify_component
+
+        assert _classify_component(margin=-1.0, expected_score=0.5, max_abs_margin=2.0, threshold=0.1) == "preserve"
+
+    def test_near_zero_margin_with_expected_score_is_strengthen(self) -> None:
+        from agent_tracegrad.diagnosis.runner import _classify_component
+
+        assert _classify_component(margin=0.05, expected_score=0.5, max_abs_margin=2.0, threshold=0.1) == "strengthen"
+
+    def test_near_zero_margin_without_expected_score_is_narrow(self) -> None:
+        from agent_tracegrad.diagnosis.runner import _classify_component
+
+        assert _classify_component(margin=0.05, expected_score=0.0, max_abs_margin=2.0, threshold=0.1) == "narrow"
+
+
+class TestSerialization:
+    def test_bad_only_serializes(self) -> None:
+        result = run_diagnosis(
+            _make_raw_trace(),
+            model=TinyBackwardModel(),
+            target_node_ids=("agent-1",),
+        )
+
+        payload = diagnosis_to_dict(result)
+        assert "bad_result" in payload
+        assert "expected_result" not in payload
+        assert "contrastive_result" not in payload
+        assert "margin_distributions" not in payload
+
+    def test_full_diagnosis_serializes(self) -> None:
+        result = run_diagnosis(
+            _make_raw_trace(),
+            model=TinyBackwardModel(),
+            target_node_ids=("agent-1",),
+            expected_target_text="five six",
+        )
+
+        payload = diagnosis_to_dict(result)
+        assert "bad_result" in payload
+        assert "expected_result" in payload
+        assert "contrastive_result" in payload
+        assert "margin_distributions" in payload
+        for md in payload["margin_distributions"]:
+            assert "grain" in md
+            assert "contributions" in md
+            for c in md["contributions"]:
+                assert "classification" in c
+                assert "margin" in c
+
+    def test_write_diagnosis_json(self, tmp_path) -> None:
+        from agent_tracegrad.diagnosis import write_diagnosis_json
+
+        result = run_diagnosis(
+            _make_raw_trace(),
+            model=TinyBackwardModel(),
+            target_node_ids=("agent-1",),
+            expected_target_text="five six",
+        )
+
+        output = tmp_path / "diagnosis.json"
+        write_diagnosis_json(result, output)
+        assert output.exists()
+
+        import json
+
+        loaded = json.loads(output.read_text())
+        assert loaded["metadata"]["mode"] == "full_diagnosis"
+
+    def test_write_diagnosis_markdown(self, tmp_path) -> None:
+        from agent_tracegrad.diagnosis import write_diagnosis_markdown
+
+        result = run_diagnosis(
+            _make_raw_trace(),
+            model=TinyBackwardModel(),
+            target_node_ids=("agent-1",),
+            expected_target_text="five six",
+        )
+
+        output = tmp_path / "diagnosis.md"
+        write_diagnosis_markdown(result, output)
+        text = output.read_text()
+        assert "# Agent TraceGrad Diagnosis Report" in text
+        assert "Component Ranking" in text
