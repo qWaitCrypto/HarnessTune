@@ -462,34 +462,89 @@ def _attribute_anchored_objective_with_gradients(
     if objective.expected_target is None or objective.bad_target is None:
         raise ValueError("anchored objective requires bad_target and expected_target")
     objective_input = _build_anchored_objective_input(trace, objective, model)
+    if objective.objective_type == "contrastive":
+        bad_loss, bad_prefix_vectors = _objective_branch_prefix_vectors(
+            model,
+            objective_input.bad_text,
+            start_token=objective_input.prefix_token_count,
+            mode=mode,
+        )
+        expected_loss, expected_prefix_vectors = _objective_branch_prefix_vectors(
+            model,
+            objective_input.expected_text,
+            start_token=objective_input.prefix_token_count,
+            mode=mode,
+            score_scale=-1.0,
+        )
+        loss = bad_loss - expected_loss
+        combined = bad_prefix_vectors + expected_prefix_vectors
+        return _anchored_objective_result(
+            trace,
+            objective,
+            model,
+            method_name,
+            execution_model_name,
+            objective_input,
+            loss,
+            combined,
+        )
+    if objective.objective_type != "expected_action":
+        raise ValueError("anchored objective only supports expected_action or contrastive")
     expected_branch = _objective_branch_forward(
         model,
         objective_input.expected_text,
         start_token=objective_input.prefix_token_count,
     )
-    branches = [expected_branch]
-    if objective.objective_type == "contrastive":
-        bad_branch = _objective_branch_forward(
-            model,
-            objective_input.bad_text,
-            start_token=objective_input.prefix_token_count,
-        )
-        loss = bad_branch.score - expected_branch.score
-        branches.insert(0, bad_branch)
-    elif objective.objective_type == "expected_action":
-        loss = expected_branch.score
-    else:
-        raise ValueError("anchored objective only supports expected_action or contrastive")
-
+    loss = expected_branch.score
     loss.backward()
-    prefix_vectors = []
-    for branch in branches:
-        gradients = branch.inputs_embeds.grad
-        if gradients is None:
-            raise RuntimeError("input embedding gradients were not populated")
-        vectors = gradients if mode == "gradient" else gradients * branch.inputs_embeds.detach()
-        prefix_vectors.append(vectors[:, : objective_input.prefix_token_count, :])
-    combined = sum(prefix_vectors)
+    gradients = expected_branch.inputs_embeds.grad
+    if gradients is None:
+        raise RuntimeError("input embedding gradients were not populated")
+    combined = gradients if mode == "gradient" else gradients * expected_branch.inputs_embeds.detach()
+    combined = combined[:, : objective_input.prefix_token_count, :]
+    return _anchored_objective_result(
+        trace,
+        objective,
+        model,
+        method_name,
+        execution_model_name,
+        objective_input,
+        loss,
+        combined,
+    )
+
+
+def _objective_branch_prefix_vectors(
+    model: ModelAdapter,
+    text: str,
+    *,
+    start_token: int,
+    mode: Literal["gradient", "gradient_times_input"],
+    score_scale: float = 1.0,
+):
+    branch = _objective_branch_forward(model, text, start_token=start_token)
+    loss = branch.score * score_scale
+    loss.backward()
+    gradients = branch.inputs_embeds.grad
+    if gradients is None:
+        raise RuntimeError("input embedding gradients were not populated")
+    vectors = gradients if mode == "gradient" else gradients * branch.inputs_embeds.detach()
+    return branch.score.detach(), vectors[:, :start_token, :].detach()
+
+
+def _anchored_objective_result(
+    trace: SerializedTrace,
+    objective: TargetObjective,
+    model: ModelAdapter,
+    method_name: str,
+    execution_model_name: str | None,
+    objective_input: _AnchoredObjectiveInput,
+    loss,
+    prefix_vectors,
+) -> AttributionResult:
+    import torch
+
+    combined = prefix_vectors
     prefix_scores = torch.linalg.vector_norm(combined, dim=-1).squeeze(0)
     token_scores = _pad_prefix_scores(prefix_scores, objective_input.trace_token_count)
     token_scores = _zero_agent_scores(token_scores, trace)
