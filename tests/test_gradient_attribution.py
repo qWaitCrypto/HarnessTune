@@ -139,6 +139,8 @@ def test_gradient_saliency_supports_contrastive_objective() -> None:
     assert result.target_id == "bad-transfer:vs:gold-refusal"
     assert result.metadata["objective_type"] == "contrastive"
     assert result.metadata["objective_formula"] == "log P(bad_target | context) - log P(expected_target | context)"
+    assert result.metadata["objective_anchor"]["mode"] == "failure_target_prefix"
+    assert result.metadata["objective_anchor"]["prefix_token_count"] == 3
     assert len(result.token_scores) == 5
     assert result.token_scores[3:] == (0.0, 0.0)
 

@@ -258,6 +258,15 @@ def _resolve_objective(objective: TargetObjective | None, target: FailureTarget)
         return TargetObjective.bad_action(target)
     if objective.bad_target is not None:
         return objective
+    if objective.objective_type == "expected_action" and objective.expected_target is not None:
+        return TargetObjective(
+            objective_id=objective.objective_id,
+            objective_type="expected_action",
+            bad_target=target,
+            expected_target=objective.expected_target,
+            source=objective.source,
+            metadata=dict(objective.metadata),
+        )
     if objective.objective_type == "contrastive" and objective.expected_target is not None:
         return TargetObjective.contrastive(
             target,

@@ -113,6 +113,8 @@ def test_run_trace_level_evaluation_uses_expected_action_objective() -> None:
     )
 
     assert result.context.objective.objective_type == "expected_action"
-    assert result.sample_results[0].analysis.objective == objective
+    assert result.sample_results[0].analysis.objective.expected_target == objective.expected_target
+    assert result.sample_results[0].analysis.objective.bad_target is not None
     assert result.sample_results[0].analysis.attribution.target_id == "gold-refusal"
+    assert result.sample_results[0].analysis.attribution.metadata["objective_anchor"]["mode"] == "failure_target_prefix"
     assert result.ablation_curve

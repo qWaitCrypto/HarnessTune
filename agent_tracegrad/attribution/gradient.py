@@ -179,6 +179,15 @@ def _attribute_objective_with_gradients(
     import torch
 
     objective.validate_against_trace(trace)
+    if objective.objective_type in {"expected_action", "contrastive"} and objective.bad_target is not None:
+        return _attribute_anchored_objective_with_gradients(
+            trace,
+            objective,
+            model,
+            method_name,
+            execution_model_name,
+            mode=mode,
+        )
     objective_input = _build_objective_input(trace, objective)
     inputs_embeds, loss = _objective_forward_loss(model, objective_input)
     loss.backward()
@@ -256,6 +265,14 @@ def _attribute_objective_integrated_gradients(
     import torch
 
     objective.validate_against_trace(trace)
+    if objective.objective_type in {"expected_action", "contrastive"} and objective.bad_target is not None:
+        return _attribute_anchored_objective_integrated_gradients(
+            trace,
+            objective,
+            model,
+            execution_model_name,
+            steps,
+        )
     objective_input = _build_objective_input(trace, objective)
     tokenized = model.tokenize(objective_input.text)
     input_ids = tokenized.input_ids
@@ -318,6 +335,27 @@ class _ObjectiveInput:
     expected_start_token: int | None = None
 
 
+@dataclass(frozen=True)
+class _AnchoredObjectiveInput:
+    prefix_text: str
+    bad_text: str
+    expected_text: str
+    trace_token_count: int
+    prefix_token_count: int
+    anchor_start_token: int
+    anchor_end_token: int
+    anchor_start_char: int
+    anchor_end_char: int
+    exact_anchor: bool
+
+
+@dataclass(frozen=True)
+class _ObjectiveBranch:
+    input_ids: object
+    inputs_embeds: object
+    score: object
+
+
 def _build_objective_input(trace: SerializedTrace, objective: TargetObjective) -> _ObjectiveInput:
     if objective.objective_type == "bad_action":
         if objective.bad_target is None:
@@ -340,6 +378,33 @@ def _build_objective_input(trace: SerializedTrace, objective: TargetObjective) -
     )
 
 
+def _build_anchored_objective_input(
+    trace: SerializedTrace,
+    objective: TargetObjective,
+    model: ModelAdapter,
+) -> _AnchoredObjectiveInput:
+    if objective.bad_target is None or objective.expected_target is None:
+        raise ValueError("anchored objective requires bad_target and expected_target")
+    anchor = _target_anchor(trace, objective.bad_target)
+    prefix_text = trace.serialized_text[: anchor["start_char"]]
+    bad_continuation = trace.serialized_text[anchor["start_char"] : anchor["end_char"]]
+    if not bad_continuation:
+        raise ValueError("bad target continuation must not be empty")
+    prefix_token_count = model.tokenize(prefix_text).input_ids.shape[1] if prefix_text else 0
+    return _AnchoredObjectiveInput(
+        prefix_text=prefix_text,
+        bad_text=f"{prefix_text}{bad_continuation}",
+        expected_text=f"{prefix_text}{objective.expected_target.content}",
+        trace_token_count=max((span.end_token for span in trace.spans), default=0),
+        prefix_token_count=prefix_token_count,
+        anchor_start_token=anchor["start_token"],
+        anchor_end_token=anchor["end_token"],
+        anchor_start_char=anchor["start_char"],
+        anchor_end_char=anchor["end_char"],
+        exact_anchor=anchor["exact"],
+    )
+
+
 def _objective_forward_loss(model: ModelAdapter, objective_input: _ObjectiveInput):
     tokenized = model.tokenize(objective_input.text)
     input_ids = tokenized.input_ids
@@ -348,6 +413,181 @@ def _objective_forward_loss(model: ModelAdapter, objective_input: _ObjectiveInpu
     inputs_embeds = model.input_embeddings(input_ids, requires_grad=True)
     output = model.forward(inputs_embeds, attention_mask)
     return inputs_embeds, _objective_loss(output.logits, input_ids, objective_input)
+
+
+def _objective_branch_forward(model: ModelAdapter, text: str, *, start_token: int) -> _ObjectiveBranch:
+    tokenized = model.tokenize(text)
+    input_ids = tokenized.input_ids
+    attention_mask = tokenized.attention_mask
+    inputs_embeds = model.input_embeddings(input_ids, requires_grad=True)
+    output = model.forward(inputs_embeds, attention_mask)
+    score = _positions_logprob_loss(output.logits, input_ids, tuple(range(start_token, input_ids.shape[1])))
+    if score is None:
+        raise ValueError("objective branch must contain at least one scored token")
+    return _ObjectiveBranch(input_ids=input_ids, inputs_embeds=inputs_embeds, score=score)
+
+
+def _objective_branch_score(model: ModelAdapter, inputs_embeds, text: str, *, start_token: int):
+    tokenized = model.tokenize(text)
+    input_ids = tokenized.input_ids
+    attention_mask = tokenized.attention_mask
+    output = model.forward(inputs_embeds, attention_mask)
+    score = _positions_logprob_loss(output.logits, input_ids, tuple(range(start_token, input_ids.shape[1])))
+    if score is None:
+        raise ValueError("objective branch must contain at least one scored token")
+    return score
+
+
+def _integrated_branch_state(model: ModelAdapter, text: str):
+    import torch
+
+    tokenized = model.tokenize(text)
+    actual_embeds = model.input_embeddings(tokenized.input_ids, requires_grad=False).detach()
+    baseline = torch.zeros_like(actual_embeds)
+    accumulated = torch.zeros_like(actual_embeds)
+    return actual_embeds, baseline, accumulated
+
+
+def _attribute_anchored_objective_with_gradients(
+    trace: SerializedTrace,
+    objective: TargetObjective,
+    model: ModelAdapter,
+    method_name: str,
+    execution_model_name: str | None,
+    *,
+    mode: Literal["gradient", "gradient_times_input"],
+) -> AttributionResult:
+    import torch
+
+    if objective.expected_target is None or objective.bad_target is None:
+        raise ValueError("anchored objective requires bad_target and expected_target")
+    objective_input = _build_anchored_objective_input(trace, objective, model)
+    expected_branch = _objective_branch_forward(
+        model,
+        objective_input.expected_text,
+        start_token=objective_input.prefix_token_count,
+    )
+    branches = [expected_branch]
+    if objective.objective_type == "contrastive":
+        bad_branch = _objective_branch_forward(
+            model,
+            objective_input.bad_text,
+            start_token=objective_input.prefix_token_count,
+        )
+        loss = bad_branch.score - expected_branch.score
+        branches.insert(0, bad_branch)
+    elif objective.objective_type == "expected_action":
+        loss = expected_branch.score
+    else:
+        raise ValueError("anchored objective only supports expected_action or contrastive")
+
+    loss.backward()
+    prefix_vectors = []
+    for branch in branches:
+        gradients = branch.inputs_embeds.grad
+        if gradients is None:
+            raise RuntimeError("input embedding gradients were not populated")
+        vectors = gradients if mode == "gradient" else gradients * branch.inputs_embeds.detach()
+        prefix_vectors.append(vectors[:, : objective_input.prefix_token_count, :])
+    combined = sum(prefix_vectors)
+    prefix_scores = torch.linalg.vector_norm(combined, dim=-1).squeeze(0)
+    token_scores = _pad_prefix_scores(prefix_scores, objective_input.trace_token_count)
+    token_scores = _zero_agent_scores(token_scores, trace)
+    result = AttributionResult(
+        method_name=method_name,
+        attribution_model_name=model.name,
+        execution_model_name=execution_model_name,
+        same_model=execution_model_name is not None and model.name == execution_model_name,
+        target_id=objective.objective_id,
+        token_scores=tuple(token_scores.detach().cpu().tolist()),
+        metadata={
+            **_objective_result_metadata(objective, loss),
+            **_anchored_objective_metadata(objective_input),
+        },
+    )
+    result.validate_against_trace(trace)
+    return result
+
+
+def _attribute_anchored_objective_integrated_gradients(
+    trace: SerializedTrace,
+    objective: TargetObjective,
+    model: ModelAdapter,
+    execution_model_name: str | None,
+    steps: int,
+) -> AttributionResult:
+    import torch
+
+    if objective.expected_target is None or objective.bad_target is None:
+        raise ValueError("anchored objective requires bad_target and expected_target")
+    objective_input = _build_anchored_objective_input(trace, objective, model)
+    expected_actual, expected_baseline, expected_accumulated = _integrated_branch_state(
+        model,
+        objective_input.expected_text,
+    )
+    bad_state = None
+    if objective.objective_type == "contrastive":
+        bad_state = _integrated_branch_state(model, objective_input.bad_text)
+    elif objective.objective_type != "expected_action":
+        raise ValueError("anchored objective only supports expected_action or contrastive")
+
+    final_loss = None
+    for step in range(1, steps + 1):
+        alpha = step / steps
+        expected_scaled = (
+            expected_baseline + alpha * (expected_actual - expected_baseline)
+        ).detach().requires_grad_(True)
+        expected_score = _objective_branch_score(
+            model,
+            expected_scaled,
+            objective_input.expected_text,
+            start_token=objective_input.prefix_token_count,
+        )
+        if bad_state is None:
+            loss = expected_score
+            expected_grad = torch.autograd.grad(loss, expected_scaled)[0]
+            expected_accumulated = expected_accumulated + expected_grad
+        else:
+            bad_actual, bad_baseline, bad_accumulated = bad_state
+            bad_scaled = (bad_baseline + alpha * (bad_actual - bad_baseline)).detach().requires_grad_(True)
+            bad_score = _objective_branch_score(
+                model,
+                bad_scaled,
+                objective_input.bad_text,
+                start_token=objective_input.prefix_token_count,
+            )
+            loss = bad_score - expected_score
+            bad_grad, expected_grad = torch.autograd.grad(loss, (bad_scaled, expected_scaled))
+            bad_state = (bad_actual, bad_baseline, bad_accumulated + bad_grad)
+            expected_accumulated = expected_accumulated + expected_grad
+        final_loss = loss
+    expected_attributions = (expected_actual - expected_baseline) * (expected_accumulated / steps)
+    prefix_vectors = [expected_attributions[:, : objective_input.prefix_token_count, :]]
+    if bad_state is not None:
+        bad_actual, bad_baseline, bad_accumulated = bad_state
+        bad_attributions = (bad_actual - bad_baseline) * (bad_accumulated / steps)
+        prefix_vectors.insert(0, bad_attributions[:, : objective_input.prefix_token_count, :])
+    combined = sum(prefix_vectors)
+    prefix_scores = torch.linalg.vector_norm(combined, dim=-1).squeeze(0)
+    token_scores = _pad_prefix_scores(prefix_scores, objective_input.trace_token_count)
+    token_scores = _zero_agent_scores(token_scores, trace)
+    if final_loss is None:
+        raise RuntimeError("integrated gradients did not run any steps")
+    result = AttributionResult(
+        method_name="integrated_gradients",
+        attribution_model_name=model.name,
+        execution_model_name=execution_model_name,
+        same_model=execution_model_name is not None and model.name == execution_model_name,
+        target_id=objective.objective_id,
+        token_scores=tuple(token_scores.detach().cpu().tolist()),
+        metadata={
+            **_objective_result_metadata(objective, final_loss),
+            **_anchored_objective_metadata(objective_input),
+            "steps": steps,
+        },
+    )
+    result.validate_against_trace(trace)
+    return result
 
 
 def _resolve_expected_start_token(objective_input: _ObjectiveInput, input_ids) -> _ObjectiveInput:
@@ -418,6 +658,20 @@ def _objective_result_metadata(objective: TargetObjective, loss) -> dict:
     }
 
 
+def _anchored_objective_metadata(objective_input: _AnchoredObjectiveInput) -> dict:
+    return {
+        "objective_anchor": {
+            "mode": "failure_target_prefix",
+            "prefix_token_count": objective_input.prefix_token_count,
+            "anchor_start_token": objective_input.anchor_start_token,
+            "anchor_end_token": objective_input.anchor_end_token,
+            "anchor_start_char": objective_input.anchor_start_char,
+            "anchor_end_char": objective_input.anchor_end_char,
+            "exact_anchor": objective_input.exact_anchor,
+        }
+    }
+
+
 def _target_token_positions(target: FailureTarget, trace: SerializedTrace) -> tuple[int, ...]:
     positions: set[int] = set()
     if target.span is not None:
@@ -427,6 +681,46 @@ def _target_token_positions(target: FailureTarget, trace: SerializedTrace) -> tu
         if span.node_id in target.node_ids:
             positions.update(range(span.start_token, span.end_token))
     return tuple(sorted(positions))
+
+
+def _target_anchor(trace: SerializedTrace, target: FailureTarget) -> dict:
+    positions = _target_token_positions(target, trace)
+    if not positions:
+        raise ValueError("failure target must contain at least one token")
+    start_token = min(positions)
+    end_token = max(positions) + 1
+    selected_spans = [span for span in trace.spans if span.node_id in target.node_ids]
+    if not selected_spans:
+        raise ValueError("failure target references no serialized spans")
+    start_span = next((span for span in selected_spans if span.start_token <= start_token < span.end_token), None)
+    end_span = next((span for span in selected_spans if span.start_token < end_token <= span.end_token), None)
+    if start_span is None:
+        start_span = min(selected_spans, key=lambda span: span.start_token)
+    if end_span is None:
+        end_span = max(selected_spans, key=lambda span: span.end_token)
+    if start_span.text_start_char is None or end_span.text_end_char is None:
+        raise ValueError("anchored objectives require trace span character offsets")
+    exact = start_token == start_span.start_token and end_token == end_span.end_token
+    start_char = start_span.text_start_char
+    end_char = end_span.text_end_char
+    if end_char <= start_char:
+        raise ValueError("failure target character anchor must be non-empty")
+    return {
+        "start_token": start_token,
+        "end_token": end_token,
+        "start_char": start_char,
+        "end_char": end_char,
+        "exact": exact,
+    }
+
+
+def _pad_prefix_scores(prefix_scores, trace_token_count: int):
+    import torch
+
+    token_scores = torch.zeros(trace_token_count, dtype=prefix_scores.dtype, device=prefix_scores.device)
+    copy_count = min(prefix_scores.shape[0], trace_token_count)
+    token_scores[:copy_count] = prefix_scores[:copy_count]
+    return token_scores
 
 
 def _zero_agent_scores(token_scores, trace: SerializedTrace):
