@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 import pytest
 
-from agent_tracegrad.evaluation import run_trace_level_evaluation
+from agent_tracegrad.evaluation import GroundTruthLabel, run_trace_level_evaluation
 from agent_tracegrad.model.adapter import ModelForwardOutput, TokenizedOutput
 from agent_tracegrad.target import ExpectedTarget, TargetObjective
 
@@ -118,3 +118,29 @@ def test_run_trace_level_evaluation_uses_expected_action_objective() -> None:
     assert result.sample_results[0].analysis.attribution.target_id == "gold-refusal"
     assert result.sample_results[0].analysis.attribution.metadata["objective_anchor"]["mode"] == "failure_target_prefix"
     assert result.ablation_curve
+
+
+def test_run_trace_level_evaluation_accepts_true_failure_annotations() -> None:
+    pytest.importorskip("torch")
+
+    result = run_trace_level_evaluation(
+        make_agentpi_raw(),
+        model=LargeTinyBackwardModel(),
+        input_format="agentpi-raw",
+        target_marker="last-agent-output",
+        operator_configs=(),
+        annotation_labels=(
+            GroundTruthLabel(
+                label_id="human-policy",
+                target_node_ids=("agentpi:simulation:policy",),
+                source="true-failure:human",
+            ),
+        ),
+        metric_ks=(1,),
+        ablation_ks=(),
+    )
+
+    assert len(result.sample_results) == 1
+    assert result.sample_results[0].sample.spec.operator == "true_failure_annotation"
+    assert result.sample_results[0].sample.perturbation.trace is result.context.trace
+    assert result.sample_results[0].metrics

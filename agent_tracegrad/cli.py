@@ -32,7 +32,7 @@ from agent_tracegrad.diagnosis import (
     load_trace_inputs,
     run_landscape_from_diagnoses,
 )
-from agent_tracegrad.evaluation import run_trace_level_evaluation, write_evaluation_artifacts
+from agent_tracegrad.evaluation import labels_for_trace, load_failure_annotations, run_trace_level_evaluation, write_evaluation_artifacts
 from agent_tracegrad.model import HuggingFaceCausalLMAdapter
 from agent_tracegrad.target import ExpectedTarget, FailureTarget, TargetObjective, failure_target_marker_names
 from agent_tracegrad.trace import trace_adapter_names
@@ -111,6 +111,11 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="JSON file containing an operator config object or list of config objects.",
     )
+    evaluate.add_argument(
+        "--annotation-file",
+        default=None,
+        help="JSON or JSONL file containing true-failure evaluation labels.",
+    )
     evaluate.add_argument("--max-samples", type=int, default=None, help="Maximum generated perturbation samples.")
     evaluate.add_argument("--metric-k", action="append", type=int, default=None, help="k for recall@k and delta_ll@k.")
     evaluate.add_argument(
@@ -178,10 +183,11 @@ def _run_analyze(args: argparse.Namespace) -> None:
 def _run_evaluate(args: argparse.Namespace) -> None:
     raw_trace = _load_json(args.trace)
     operator_configs = _load_operator_configs(args)
-    if not operator_configs:
-        raise ValueError("evaluate requires at least one --operator-config or --operator-config-file entry")
     model = _load_model(args)
     target_node_ids = _target_node_ids(args)
+    annotation_labels = _load_annotation_labels(args, raw_trace, model.tokenizer)
+    if not operator_configs and not annotation_labels:
+        raise ValueError("evaluate requires at least one operator config or annotation file entry")
     result = run_trace_level_evaluation(
         raw_trace,
         model=model,
@@ -192,6 +198,7 @@ def _run_evaluate(args: argparse.Namespace) -> None:
         target_span=_target_span(args),
         objective=_build_objective(args, target_node_ids=target_node_ids),
         operator_configs=operator_configs,
+        annotation_labels=annotation_labels,
         max_samples=args.max_samples,
         method=args.method,
         execution_model_name=args.execution_model_name,
@@ -492,6 +499,24 @@ def _load_operator_configs(args: argparse.Namespace) -> tuple[dict[str, Any], ..
             configs.append(_coerce_operator_config(loaded))
     configs.extend(_coerce_operator_config(json.loads(raw)) for raw in args.operator_config)
     return tuple(configs)
+
+
+def _load_annotation_labels(args: argparse.Namespace, raw_trace: Any, tokenizer: Any):
+    if not args.annotation_file:
+        return ()
+    from agent_tracegrad.trace import ingest_trace
+
+    trace = ingest_trace(
+        raw_trace,
+        input_format=args.input_format,
+        tokenizer=tokenizer,
+        trace_metadata={"trace_path": args.trace},
+    )
+    return labels_for_trace(
+        load_failure_annotations(args.annotation_file),
+        trace,
+        trace_path=args.trace,
+    )
 
 
 def _load_candidate_actions(args: argparse.Namespace) -> tuple[CandidateAction, ...]:

@@ -6,7 +6,8 @@ from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Any, Mapping, Sequence
 
-from agent_tracegrad.evaluation.sample_generation import TraceLevelSample, generate_trace_level_samples
+from agent_tracegrad.evaluation.ground_truth import GroundTruthLabel
+from agent_tracegrad.evaluation.sample_generation import TraceLevelSample, generate_trace_level_samples, samples_from_labels
 from agent_tracegrad.target.marker import FailureTargetMarker
 from agent_tracegrad.target.objective import TargetObjective
 from agent_tracegrad.target.registry import get_failure_target_marker
@@ -42,6 +43,7 @@ def generate_evaluation_context(
     target_span: tuple[int, int] | None = None,
     objective: TargetObjective | None = None,
     operator_configs: Sequence[Mapping[str, Any]],
+    annotation_labels: Sequence[GroundTruthLabel] = (),
     max_samples: int | None = None,
     trace_metadata: Mapping[str, Any] | None = None,
     adapter: TraceAdapter | None = None,
@@ -66,12 +68,16 @@ def generate_evaluation_context(
     target.validate_against_trace(trace)
     resolved_objective = _resolve_objective(objective, target)
     resolved_objective.validate_against_trace(trace)
-    samples = generate_trace_level_samples(
-        trace,
-        serializer,
-        operator_configs=operator_configs,
-        max_samples=max_samples,
-    )
+    samples = samples_from_labels(trace, annotation_labels)
+    if operator_configs:
+        samples = samples + generate_trace_level_samples(
+            trace,
+            serializer,
+            operator_configs=operator_configs,
+            max_samples=max_samples,
+        )
+    if not samples:
+        raise ValueError("evaluation requires at least one operator config or annotation label")
     return TraceEvaluationContext(
         trace=trace,
         targets=(target,),

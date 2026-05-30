@@ -19,6 +19,7 @@ from agent_tracegrad.evaluation.evidence import (
     evidence_report_to_dict,
 )
 from agent_tracegrad.evaluation.counterfactual import DeltaLLPoint, delta_ll_curve, objective_loss
+from agent_tracegrad.evaluation.annotations import FailureAnnotation, labels_for_trace, load_failure_annotations
 from agent_tracegrad.evaluation.metrics import (
     MetricResult,
     delta_ll_at_k,
@@ -46,6 +47,7 @@ __all__ = [
     "EvaluationRunResult",
     "EvaluationSampleResult",
     "EvidenceReport",
+    "FailureAnnotation",
     "GroundTruthLabel",
     "MetricResult",
     "PerturbationSpec",
@@ -67,6 +69,8 @@ __all__ = [
     "evidence_report_to_dict",
     "generate_evaluation_context",
     "generate_trace_level_samples",
+    "labels_for_trace",
+    "load_failure_annotations",
     "metric_to_dict",
     "method_consistency",
     "objective_loss",

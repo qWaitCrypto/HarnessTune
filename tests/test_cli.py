@@ -231,6 +231,73 @@ def test_cli_evaluate_writes_artifacts(tmp_path, monkeypatch) -> None:
     assert payload["ablation_curve"]
 
 
+def test_cli_evaluate_accepts_annotation_file_without_operator_config(tmp_path, monkeypatch) -> None:
+    pytest.importorskip("torch")
+    trace_path = tmp_path / "trace.json"
+    annotation_path = tmp_path / "annotations.json"
+    output_dir = tmp_path / "eval"
+    trace_path.write_text(
+        json.dumps(
+            {
+                "nodes": [
+                    {
+                        "node_id": "sys-1",
+                        "block_role": "system",
+                        "sub_block_kind": "system.instruction",
+                        "content": "policy text",
+                        "sequence_index": 0,
+                    },
+                    {
+                        "node_id": "agent-1",
+                        "block_role": "agent",
+                        "sub_block_kind": "agent.content",
+                        "content": "wrong answer",
+                        "sequence_index": 1,
+                    },
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    annotation_path.write_text(
+        json.dumps(
+            {
+                "annotation_id": "ann-policy",
+                "target_node_ids": ["sys-1"],
+                "source": "human",
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "agent_tracegrad.cli.HuggingFaceCausalLMAdapter.from_pretrained",
+        lambda *args, **kwargs: FakeCliModel(),
+    )
+
+    exit_code = main(
+        [
+            "evaluate",
+            "--trace",
+            str(trace_path),
+            "--model",
+            "fake-model",
+            "--target-node-id",
+            "agent-1",
+            "--annotation-file",
+            str(annotation_path),
+            "--output-dir",
+            str(output_dir),
+            "--output-prefix",
+            "eval",
+        ]
+    )
+
+    assert exit_code == 0
+    payload = json.loads((output_dir / "eval.json").read_text(encoding="utf-8"))
+    assert payload["sample_results"][0]["sample"]["spec"]["operator"] == "true_failure_annotation"
+    assert payload["sample_results"][0]["sample"]["label"]["label_id"] == "ann-policy"
+
+
 def test_cli_diagnose_writes_artifacts(tmp_path, monkeypatch) -> None:
     pytest.importorskip("torch")
     trace_path = tmp_path / "trace.json"

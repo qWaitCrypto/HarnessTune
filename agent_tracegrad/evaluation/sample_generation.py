@@ -10,6 +10,7 @@ from agent_tracegrad.evaluation.perturbation.trace_level import (
     TraceLevelPerturbation,
     apply_trace_level_perturbation,
 )
+from agent_tracegrad.evaluation.ground_truth import GroundTruthLabel
 from agent_tracegrad.evaluation.spec import PerturbationSpec
 from agent_tracegrad.trace.schema import SerializedTrace, TraceNode
 from agent_tracegrad.trace.serializer import TraceSerializer
@@ -60,6 +61,29 @@ def generate_trace_level_samples(
             if max_samples is not None and len(samples) >= max_samples:
                 return tuple(samples)
     return tuple(samples)
+
+
+def samples_from_labels(
+    trace: SerializedTrace,
+    labels: Sequence[GroundTruthLabel],
+) -> tuple[TraceLevelSample, ...]:
+    """Wrap externally supplied labels as identity samples over the original trace."""
+
+    return tuple(
+        TraceLevelSample(
+            spec=PerturbationSpec(
+                operator="true_failure_annotation",
+                target_node_ids=label.target_node_ids,
+                parameters={"label_id": label.label_id, "source": label.source},
+            ),
+            perturbation=TraceLevelPerturbation(trace=trace, label=label),
+            metadata={
+                "source": "true-failure-annotation",
+                "label_id": label.label_id,
+            },
+        )
+        for label in labels
+    )
 
 
 def _perturbable_nodes(trace: SerializedTrace) -> list[TraceNode]:

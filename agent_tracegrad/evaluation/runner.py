@@ -12,6 +12,7 @@ from agent_tracegrad.analysis import (
     SingleTraceAnalysisResult,
     analyze_trace,
 )
+from agent_tracegrad.evaluation.ground_truth import GroundTruthLabel
 from agent_tracegrad.evaluation.metrics import (
     MetricResult,
     metrics_for_distribution,
@@ -80,6 +81,7 @@ def run_trace_level_evaluation(
     target_span: tuple[int, int] | None = None,
     objective: TargetObjective | None = None,
     operator_configs: Sequence[Mapping[str, Any]],
+    annotation_labels: Sequence[GroundTruthLabel] = (),
     max_samples: int | None = None,
     method: str = "gradient_saliency",
     execution_model_name: str | None = None,
@@ -102,6 +104,7 @@ def run_trace_level_evaluation(
         target_span=target_span,
         objective=objective,
         operator_configs=operator_configs,
+        annotation_labels=annotation_labels,
         max_samples=max_samples,
         trace_metadata=trace_metadata,
     )
