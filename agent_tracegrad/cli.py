@@ -10,6 +10,7 @@ from typing import Any
 from agent_tracegrad.analysis import analyze_trace, write_analysis_json
 from agent_tracegrad.diagnosis import (
     CandidateAction,
+    read_diagnosis_json,
     run_diagnosis,
     run_drill,
     run_influence_matrix,
@@ -60,6 +61,7 @@ def build_parser() -> argparse.ArgumentParser:
     _add_model_args(drill)
     _add_target_args(drill)
     _add_output_dir_args(drill, default_prefix="tracegrad-drill", noun="drill")
+    drill.add_argument("--diagnose-result", default=None, help="Existing diagnose JSON artifact to drill without rerunning attribution.")
     _add_objective_args(drill)
     _add_attribution_args(drill)
     drill.add_argument(
@@ -217,8 +219,8 @@ def _run_diagnose(args: argparse.Namespace) -> None:
 
 def _run_drill(args: argparse.Namespace) -> None:
     raw_trace = _load_json(args.trace)
-    model = _load_model(args)
-    diagnosis = run_diagnosis(
+    model = None if args.diagnose_result else _load_model(args)
+    diagnosis = read_diagnosis_json(args.diagnose_result) if args.diagnose_result else run_diagnosis(
         raw_trace,
         model=model,
         **_diagnosis_kwargs(args, trace_path=args.trace),
@@ -229,6 +231,8 @@ def _run_drill(args: argparse.Namespace) -> None:
     write_drill_markdown(drill, output_dir / f"{args.output_prefix}.md")
     candidates = _load_candidate_actions(args)
     if candidates:
+        if model is None:
+            model = _load_model(args)
         matrix = run_influence_matrix(
             raw_trace,
             model=model,

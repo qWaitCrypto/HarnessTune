@@ -362,6 +362,86 @@ def test_cli_drill_writes_artifacts(tmp_path, monkeypatch) -> None:
     assert payload["atoms"]
 
 
+def test_cli_drill_can_read_existing_diagnose_artifact(tmp_path, monkeypatch) -> None:
+    pytest.importorskip("torch")
+    trace_path = tmp_path / "trace.json"
+    diagnose_dir = tmp_path / "diagnose"
+    drill_dir = tmp_path / "drill"
+    trace_path.write_text(
+        json.dumps(
+            {
+                "nodes": [
+                    {
+                        "node_id": "sys-1",
+                        "block_role": "system",
+                        "sub_block_kind": "system.instruction",
+                        "content": "# Policy\n- First call transfer_to_human_agents.\n- Refuse after deadline.",
+                        "sequence_index": 0,
+                    },
+                    {
+                        "node_id": "agent-1",
+                        "block_role": "agent",
+                        "sub_block_kind": "agent.content",
+                        "content": "wrong answer",
+                        "sequence_index": 1,
+                    },
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    load_count = 0
+
+    def fake_load(*args, **kwargs):
+        nonlocal load_count
+        load_count += 1
+        return FakeCliModel()
+
+    monkeypatch.setattr("agent_tracegrad.cli.HuggingFaceCausalLMAdapter.from_pretrained", fake_load)
+
+    assert main(
+        [
+            "diagnose",
+            "--trace",
+            str(trace_path),
+            "--model",
+            "fake-model",
+            "--target-node-id",
+            "agent-1",
+            "--expected-target-text",
+            "right answer",
+            "--output-dir",
+            str(diagnose_dir),
+            "--output-prefix",
+            "diag",
+        ]
+    ) == 0
+    assert load_count == 1
+
+    assert main(
+        [
+            "drill",
+            "--trace",
+            str(trace_path),
+            "--model",
+            "fake-model",
+            "--target-node-id",
+            "agent-1",
+            "--expected-target-text",
+            "right answer",
+            "--diagnose-result",
+            str(diagnose_dir / "diag.json"),
+            "--output-dir",
+            str(drill_dir),
+            "--output-prefix",
+            "drill",
+        ]
+    ) == 0
+    assert load_count == 1
+    assert (drill_dir / "drill.json").exists()
+
+
 def test_cli_drill_writes_influence_matrix_when_candidates_are_provided(tmp_path, monkeypatch) -> None:
     pytest.importorskip("torch")
     trace_path = tmp_path / "trace.json"

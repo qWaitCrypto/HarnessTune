@@ -6,6 +6,7 @@ from dataclasses import dataclass
 
 from agent_tracegrad.diagnosis import (
     DiagnosisResult,
+    diagnosis_from_dict,
     diagnosis_to_dict,
     run_diagnosis,
 )
@@ -257,6 +258,26 @@ class TestSerialization:
             for c in md["contributions"]:
                 assert "classification" in c
                 assert "margin" in c
+        assert payload["bad_result"]["trace"]["nodes"]
+        assert payload["bad_result"]["trace"]["spans"]
+        assert payload["bad_result"]["trace"]["serialized_text"]
+
+    def test_full_diagnosis_round_trips_for_drill(self) -> None:
+        from agent_tracegrad.diagnosis import run_drill
+
+        result = run_diagnosis(
+            _make_raw_trace(),
+            model=TinyBackwardModel(),
+            target_node_ids=("agent-1",),
+            expected_target_text="five six",
+        )
+
+        restored = diagnosis_from_dict(diagnosis_to_dict(result))
+        drill = run_drill(restored)
+
+        assert restored.bad_result.trace.serialized_text == result.bad_result.trace.serialized_text
+        assert restored.contrastive_result.attribution.token_scores == result.contrastive_result.attribution.token_scores
+        assert drill.atoms
 
     def test_write_diagnosis_json(self, tmp_path) -> None:
         from agent_tracegrad.diagnosis import write_diagnosis_json

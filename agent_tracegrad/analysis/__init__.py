@@ -11,6 +11,8 @@ from agent_tracegrad.analysis.ranking import RankedAttribution, rank_distributio
 from agent_tracegrad.analysis.single_trace import (
     AnalysisRanking,
     SingleTraceAnalysisResult,
+    analysis_from_artifact_dict,
+    analysis_to_artifact_dict,
     analysis_to_dict,
     analyze_normalized_trace,
     analyze_trace,
@@ -27,6 +29,8 @@ __all__ = [
     "SubBlockAttribution",
     "aggregate_attribution",
     "analysis_to_dict",
+    "analysis_to_artifact_dict",
+    "analysis_from_artifact_dict",
     "analyze_normalized_trace",
     "analyze_trace",
     "rank_distribution",

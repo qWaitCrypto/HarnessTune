@@ -24,7 +24,7 @@ from agent_tracegrad.target.registry import get_failure_target_marker
 from agent_tracegrad.target.schema import FailureTarget
 from agent_tracegrad.trace.adapter import TraceAdapter
 from agent_tracegrad.trace.registry import get_trace_adapter
-from agent_tracegrad.trace.schema import SerializedTrace
+from agent_tracegrad.trace.schema import SerializedTrace, SpanMetadata, TraceNode
 from agent_tracegrad.trace.serializer import TraceSerializer
 
 
@@ -200,6 +200,101 @@ def analysis_to_dict(result: SingleTraceAnalysisResult) -> dict[str, Any]:
         "rankings": [_ranking_to_dict(ranking) for ranking in result.rankings],
         "metadata": dict(result.metadata),
     }
+
+
+def analysis_to_artifact_dict(result: SingleTraceAnalysisResult) -> dict[str, Any]:
+    payload = analysis_to_dict(result)
+    payload["trace"]["serialized_text"] = result.trace.serialized_text
+    payload["trace"]["nodes"] = [
+        {
+            "node_id": node.node_id,
+            "block_role": node.block_role,
+            "sub_block_kind": node.sub_block_kind,
+            "content": node.content,
+            "metadata": dict(node.metadata),
+            "sequence_index": node.sequence_index,
+            "timestamp": str(node.timestamp) if node.timestamp is not None else None,
+            "parents": list(node.parents),
+        }
+        for node in sorted(result.trace.nodes.values(), key=lambda item: (item.sequence_index or 0, item.node_id))
+    ]
+    payload["trace"]["spans"] = [
+        {
+            "span_id": span.span_id,
+            "node_id": span.node_id,
+            "block_role": span.block_role,
+            "sub_block_kind": span.sub_block_kind,
+            "start_token": span.start_token,
+            "end_token": span.end_token,
+            "text_start_char": span.text_start_char,
+            "text_end_char": span.text_end_char,
+            "metadata": dict(span.metadata),
+        }
+        for span in result.trace.spans
+    ]
+    return payload
+
+
+def analysis_from_artifact_dict(payload: Mapping[str, Any]) -> SingleTraceAnalysisResult:
+    trace_payload = payload["trace"]
+    nodes = {
+        item["node_id"]: TraceNode(
+            node_id=item["node_id"],
+            block_role=item["block_role"],
+            sub_block_kind=item["sub_block_kind"],
+            content=item["content"],
+            metadata=item.get("metadata") or {},
+            sequence_index=item.get("sequence_index"),
+            timestamp=item.get("timestamp"),
+            parents=tuple(item.get("parents") or ()),
+        )
+        for item in trace_payload["nodes"]
+    }
+    trace = SerializedTrace(
+        nodes=nodes,
+        serialized_text=trace_payload["serialized_text"],
+        spans=tuple(
+            SpanMetadata(
+                span_id=item["span_id"],
+                node_id=item["node_id"],
+                block_role=item["block_role"],
+                sub_block_kind=item["sub_block_kind"],
+                start_token=item["start_token"],
+                end_token=item["end_token"],
+                text_start_char=item.get("text_start_char"),
+                text_end_char=item.get("text_end_char"),
+                metadata=item.get("metadata") or {},
+            )
+            for item in trace_payload["spans"]
+        ),
+        tokenizer_name=trace_payload["tokenizer_name"],
+        metadata=trace_payload.get("metadata") or {},
+    )
+    target_payload = payload["target"]
+    attribution_payload = payload["attribution"]
+    from agent_tracegrad.attribution.result import AttributionResult
+
+    return SingleTraceAnalysisResult(
+        trace=trace,
+        target=FailureTarget(
+            target_id=target_payload["target_id"],
+            node_ids=tuple(target_payload["node_ids"]),
+            span=tuple(target_payload["span"]) if target_payload.get("span") is not None else None,
+        ),
+        attribution=AttributionResult(
+            method_name=attribution_payload["method_name"],
+            attribution_model_name=attribution_payload["attribution_model_name"],
+            execution_model_name=attribution_payload["execution_model_name"],
+            same_model=attribution_payload["same_model"],
+            target_id=attribution_payload["target_id"],
+            token_scores=tuple(attribution_payload["token_scores"]),
+            metadata=attribution_payload.get("metadata") or {},
+        ),
+        distributions=(),
+        rankings=(),
+        metadata=payload.get("metadata") or {},
+        objective=None,
+    )
 
 
 def _build_method(

@@ -43,6 +43,8 @@ from agent_tracegrad.diagnosis.patterns import detect_diagnostic_labels, diagnos
 from agent_tracegrad.diagnosis.report import diagnosis_to_markdown, write_diagnosis_markdown
 from agent_tracegrad.diagnosis.runner import (
     diagnosis_to_dict,
+    diagnosis_from_dict,
+    read_diagnosis_json,
     run_diagnosis,
     write_diagnosis_json,
 )
@@ -85,6 +87,7 @@ __all__ = [
     "diagnosis_to_html",
     "diagnosis_to_markdown",
     "diagnosis_to_dict",
+    "diagnosis_from_dict",
     "drill_result_to_dict",
     "drill_result_to_markdown",
     "influence_matrix_to_dict",
@@ -93,6 +96,7 @@ __all__ = [
     "landscape_to_html",
     "landscape_to_markdown",
     "load_trace_inputs",
+    "read_diagnosis_json",
     "run_diagnosis",
     "run_drill",
     "run_influence_matrix",

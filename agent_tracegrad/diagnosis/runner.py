@@ -8,6 +8,8 @@ from typing import Any, Mapping, Sequence
 
 from agent_tracegrad.analysis.single_trace import (
     SingleTraceAnalysisResult,
+    analysis_from_artifact_dict,
+    analysis_to_artifact_dict,
     analysis_to_dict,
     analyze_trace,
 )
@@ -474,14 +476,14 @@ def _extract_loss(result: SingleTraceAnalysisResult) -> float:
 
 def diagnosis_to_dict(result: DiagnosisResult) -> dict[str, Any]:
     payload: dict[str, Any] = {
-        "bad_result": analysis_to_dict(result.bad_result),
+        "bad_result": analysis_to_artifact_dict(result.bad_result),
         "confidence_level": result.confidence_level,
         "metadata": dict(result.metadata),
     }
     if result.expected_result is not None:
-        payload["expected_result"] = analysis_to_dict(result.expected_result)
+        payload["expected_result"] = analysis_to_artifact_dict(result.expected_result)
     if result.contrastive_result is not None:
-        payload["contrastive_result"] = analysis_to_dict(result.contrastive_result)
+        payload["contrastive_result"] = analysis_to_artifact_dict(result.contrastive_result)
     if result.margin_distributions:
         payload["margin_distributions"] = [
             _margin_distribution_to_dict(md) for md in result.margin_distributions
@@ -514,6 +516,37 @@ def diagnosis_to_dict(result: DiagnosisResult) -> dict[str, Any]:
     return payload
 
 
+def diagnosis_from_dict(payload: Mapping[str, Any]) -> DiagnosisResult:
+    return DiagnosisResult(
+        bad_result=analysis_from_artifact_dict(payload["bad_result"]),
+        expected_result=analysis_from_artifact_dict(payload["expected_result"]) if "expected_result" in payload else None,
+        contrastive_result=analysis_from_artifact_dict(payload["contrastive_result"]) if "contrastive_result" in payload else None,
+        margin_distributions=tuple(
+            _margin_distribution_from_dict(item)
+            for item in payload.get("margin_distributions", ())
+        ),
+        evidence=(),
+        ablations=tuple(
+            DiagnosisAblation(
+                ablation_type=item["ablation_type"],
+                k=item["k"],
+                target_node_ids=tuple(item["target_node_ids"]),
+                baseline_loss=item["baseline_loss"],
+                ablated_loss=item["ablated_loss"],
+                delta_loss=item["delta_loss"],
+            )
+            for item in payload.get("ablations", ())
+        ),
+        diagnostic_labels=(),
+        confidence_level=payload.get("confidence_level", "weak"),
+        metadata=payload.get("metadata") or {},
+    )
+
+
+def read_diagnosis_json(path: str | Path) -> DiagnosisResult:
+    return diagnosis_from_dict(json.loads(Path(path).read_text(encoding="utf-8")))
+
+
 def write_diagnosis_json(result: DiagnosisResult, output_path: str | Path) -> None:
     path = Path(output_path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -542,3 +575,24 @@ def _margin_distribution_to_dict(md: MarginDistribution) -> dict[str, Any]:
             for c in md.contributions
         ],
     }
+
+
+def _margin_distribution_from_dict(payload: Mapping[str, Any]) -> MarginDistribution:
+    return MarginDistribution(
+        grain=payload["grain"],
+        view_name=payload["view_name"],
+        total_margin=payload["total_margin"],
+        contributions=tuple(
+            MarginContribution(
+                instance_id=item["instance_id"],
+                block_role=item["block_role"],
+                sub_block_kind=item["sub_block_kind"],
+                node_ids=tuple(item["node_ids"]),
+                bad_score=item["bad_score"],
+                expected_score=item["expected_score"],
+                margin=item["margin"],
+                classification=item["classification"],
+            )
+            for item in payload.get("contributions", ())
+        ),
+    )
