@@ -245,6 +245,7 @@ def test_trace_serializer_builds_token_aligned_spans() -> None:
     assert trace.serialized_text == "Follow rules\nDone now"
     assert trace.tokenizer_name == "whitespace-offset-tokenizer"
     assert trace.metadata["trace_id"] == "fixture-1"
+    assert trace.token_offsets == ((0, 6), (7, 12), (13, 17), (18, 21))
     assert [(span.node_id, span.start_token, span.end_token) for span in trace.spans] == [
         ("sys-1", 0, 2),
         ("agent-1", 2, 4),

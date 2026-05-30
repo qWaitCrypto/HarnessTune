@@ -90,6 +90,21 @@ def test_atomize_tool_schema_extracts_json_fields() -> None:
     assert "tool_schema.description" in kinds
 
 
+def test_atomize_tool_schema_uses_jsonpath_source_span_for_duplicate_values() -> None:
+    node = TraceNode(
+        node_id="schema",
+        block_role="system",
+        sub_block_kind="system.tool_schema",
+        content='{"first":"same","second":"same"}',
+    )
+
+    atoms = {atom.metadata["jsonpath"]: atom for atom in atomize_tool_schema(node)}
+
+    assert atoms["$.first"].text == '"same"'
+    assert atoms["$.second"].text == '"same"'
+    assert atoms["$.second"].char_start > atoms["$.first"].char_start
+
+
 def test_run_drill_produces_atom_scores() -> None:
     diagnosis = run_diagnosis(
         {

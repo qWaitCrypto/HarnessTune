@@ -180,6 +180,64 @@ def test_inject_unrelated_content_appends_configured_text() -> None:
     assert result.trace.nodes["agent-1"].content == "wrong answer"
 
 
+def test_remove_text_span_removes_configured_character_range() -> None:
+    trace, serializer = make_trace()
+    spec = PerturbationSpec(
+        operator="remove_text_span",
+        target_node_ids=("user-1",),
+        parameters={"start": 6, "end": 11},
+    )
+
+    result = apply_trace_level_perturbation(trace, spec, serializer)
+
+    assert result.trace.nodes["user-1"].content == "alpha gamma delta"
+
+
+def test_insert_text_inserts_configured_text() -> None:
+    trace, serializer = make_trace()
+    spec = PerturbationSpec(
+        operator="insert_text",
+        target_node_ids=("sys-1",),
+        parameters={"position": len("Follow rules"), "text": "\nRefusal takes precedence."},
+    )
+
+    result = apply_trace_level_perturbation(trace, spec, serializer)
+
+    assert result.trace.nodes["sys-1"].content == "Follow rules\nRefusal takes precedence."
+
+
+def test_mask_jsonpath_masks_precise_duplicate_value_path() -> None:
+    nodes = JsonTraceAdapter().adapt(
+        [
+            {
+                "node_id": "tool-result",
+                "block_role": "user",
+                "sub_block_kind": "user.tool_result",
+                "content": '{"created":"2024-05-15","updated":"2024-05-15"}',
+                "sequence_index": 0,
+            },
+            {
+                "node_id": "agent-1",
+                "block_role": "agent",
+                "sub_block_kind": "agent.content",
+                "content": "wrong answer",
+                "sequence_index": 1,
+            },
+        ]
+    )
+    serializer = TraceSerializer(WhitespaceOffsetTokenizer())
+    trace = serializer.serialize(nodes)
+    spec = PerturbationSpec(
+        operator="mask_jsonpath",
+        target_node_ids=("tool-result",),
+        parameters={"jsonpath": "$.updated", "replacement": '"MASKED"'},
+    )
+
+    result = apply_trace_level_perturbation(trace, spec, serializer)
+
+    assert result.trace.nodes["tool-result"].content == '{"created":"2024-05-15","updated":"MASKED"}'
+
+
 def test_swap_between_instances_swaps_two_configured_nodes() -> None:
     trace, serializer = make_swap_trace()
     spec = PerturbationSpec(

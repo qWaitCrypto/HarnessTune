@@ -110,12 +110,9 @@ def _top_token_evidence(analysis: SingleTraceAnalysisResult, *, limit: int) -> t
         if span.block_role == "agent":
             continue
         token_count = span.end_token - span.start_token
-        char_offsets = _token_char_offsets(
-            analysis.trace.serialized_text,
-            span.text_start_char,
-            span.text_end_char,
-            token_count=token_count,
-        )
+        char_offsets = _span_token_offsets(analysis, span.node_id)
+        if len(char_offsets) != token_count:
+            raise ValueError("SerializedTrace token_offsets must align with span token ranges")
         for offset_index, token_index in enumerate(range(span.start_token, span.end_token)):
             score = analysis.attribution.token_scores[token_index]
             if score <= 0.0:
@@ -179,52 +176,20 @@ def _window_char_range(
     end_token: int,
 ) -> tuple[int, int]:
     span = next(item for item in analysis.trace.spans if item.node_id == node_id)
-    token_count = span.end_token - span.start_token
-    char_offsets = _token_char_offsets(
-        analysis.trace.serialized_text,
-        span.text_start_char,
-        span.text_end_char,
-        token_count=token_count,
-    )
+    char_offsets = _span_token_offsets(analysis, node_id)
     start_index = start_token - span.start_token
     end_index = end_token - span.start_token - 1
     return char_offsets[start_index][0], char_offsets[end_index][1]
 
 
-def _token_char_offsets(
-    text: str,
-    char_start: int | None,
-    char_end: int | None,
-    *,
-    token_count: int,
+def _span_token_offsets(
+    analysis: SingleTraceAnalysisResult,
+    node_id: str,
 ) -> tuple[tuple[int, int], ...]:
-    if token_count <= 0:
-        return ()
-    if char_start is None or char_end is None or char_end <= char_start:
-        return tuple((0, 0) for _ in range(token_count))
-    words = list(_word_offsets(text, char_start, char_end))
-    if len(words) == token_count:
-        return tuple(words)
-    width = max(1, char_end - char_start)
-    offsets: list[tuple[int, int]] = []
-    for index in range(token_count):
-        start = char_start + int(width * index / token_count)
-        end = char_start + int(width * (index + 1) / token_count)
-        offsets.append((start, max(start, end)))
-    return tuple(offsets)
-
-
-def _word_offsets(text: str, start: int, end: int):
-    cursor = start
-    while cursor < end:
-        while cursor < end and text[cursor].isspace():
-            cursor += 1
-        if cursor >= end:
-            break
-        token_start = cursor
-        while cursor < end and not text[cursor].isspace():
-            cursor += 1
-        yield token_start, cursor
+    span = next(item for item in analysis.trace.spans if item.node_id == node_id)
+    if not analysis.trace.token_offsets:
+        raise ValueError("SerializedTrace.token_offsets are required for exact evidence extraction")
+    return tuple(analysis.trace.token_offsets[span.start_token:span.end_token])
 
 
 def _compact_text(text: str, *, max_length: int = 240) -> str:

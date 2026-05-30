@@ -108,6 +108,7 @@ class SerializedTrace:
     spans: Sequence[SpanMetadata]
     tokenizer_name: str
     metadata: Mapping[str, Any] = field(default_factory=dict)
+    token_offsets: Sequence[tuple[int, int]] = field(default_factory=tuple)
 
     def __post_init__(self) -> None:
         if not self.tokenizer_name:
@@ -127,6 +128,11 @@ class SerializedTrace:
                 raise ValueError(f"span {span.span_id!r} references unknown node {span.node_id!r}")
             if span.block_role != node.block_role or span.sub_block_kind != node.sub_block_kind:
                 raise ValueError(f"span {span.span_id!r} role/kind does not match node {span.node_id!r}")
+        token_offsets = tuple((int(start), int(end)) for start, end in self.token_offsets)
+        for start, end in token_offsets:
+            if start < 0 or end < start:
+                raise ValueError("token_offsets must be non-negative half-open ranges")
         object.__setattr__(self, "nodes", MappingProxyType(nodes))
         object.__setattr__(self, "spans", spans)
+        object.__setattr__(self, "token_offsets", token_offsets)
         object.__setattr__(self, "metadata", _copy_metadata(self.metadata))

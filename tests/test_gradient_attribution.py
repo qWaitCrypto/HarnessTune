@@ -122,6 +122,8 @@ def test_gradient_saliency_supports_expected_action_objective() -> None:
 
     assert result.target_id == "gold-refusal"
     assert result.metadata["objective_type"] == "expected_action"
+    assert result.metadata["score_method"] == "norm_saliency"
+    assert result.metadata["score_family"] == "sensitivity"
     assert result.metadata["objective"]["expected_target"]["content"] == "five six"
     assert len(result.token_scores) == 5
     assert result.token_scores[0] > 0
@@ -138,6 +140,8 @@ def test_gradient_saliency_supports_contrastive_objective() -> None:
 
     assert result.target_id == "bad-transfer:vs:gold-refusal"
     assert result.metadata["objective_type"] == "contrastive"
+    assert result.metadata["score_method"] == "branch_difference_norm_saliency"
+    assert result.metadata["score_family"] == "sensitivity"
     assert result.metadata["objective_formula"] == "log P(bad_target | context) - log P(expected_target | context)"
     assert result.metadata["objective_anchor"]["mode"] == "failure_target_prefix"
     assert result.metadata["objective_anchor"]["prefix_token_count"] == 3

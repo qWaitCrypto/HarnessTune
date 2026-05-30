@@ -41,7 +41,7 @@ class TraceSerializer:
 
         serialized_text = "".join(parts)
         encoded = self.tokenizer(serialized_text, return_offsets_mapping=True, add_special_tokens=False)
-        offsets = tuple(encoded.get("offset_mapping") or ())
+        offsets = tuple(_coerce_offset(offset) for offset in (encoded.get("offset_mapping") or ()))
         if not offsets:
             raise ValueError("tokenizer must return non-empty offset_mapping")
 
@@ -51,7 +51,7 @@ class TraceSerializer:
             token_indexes = [
                 token_index
                 for token_index, offset in enumerate(offsets)
-                if _token_overlaps_range(_coerce_offset(offset), char_start, char_end)
+                if _token_overlaps_range(offset, char_start, char_end)
             ]
             if not token_indexes and node.content:
                 raise ValueError(f"node {node.node_id!r} did not align to any tokenizer offsets")
@@ -76,6 +76,7 @@ class TraceSerializer:
             serialized_text=serialized_text,
             spans=tuple(spans),
             tokenizer_name=self.tokenizer_name or getattr(self.tokenizer, "name_or_path", self.tokenizer.__class__.__name__),
+            token_offsets=offsets,
             metadata=metadata or {},
         )
 

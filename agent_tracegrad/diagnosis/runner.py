@@ -225,7 +225,7 @@ def _align_and_compute(
 
     contributions: list[MarginContribution] = []
     for iid, bad_score, exp_score, margin in raw:
-        classification = _classify_component(
+        classification, classification_reason = _classify_component(
             margin, exp_score, max_abs_margin, strengthen_threshold,
         )
         inst = contrastive_by_id.get(iid) or bad_by_id.get(iid) or expected_by_id[iid]
@@ -239,6 +239,7 @@ def _align_and_compute(
                 expected_score=exp_score,
                 margin=margin,
                 classification=classification,
+                classification_reason=classification_reason,
             )
         )
     return tuple(contributions)
@@ -391,12 +392,12 @@ def _classify_component(
     expected_score: float,
     max_abs_margin: float,
     threshold: float,
-) -> ComponentClassification:
+) -> tuple[ComponentClassification, str]:
     if max_abs_margin > 0.0 and abs(margin) < threshold * max_abs_margin and expected_score > 0.0:
-        return "strengthen"
+        return "strengthen", "expected_support_present_but_margin_near_zero"
     if margin < 0.0:
-        return "preserve"
-    return "narrow"
+        return "preserve", "expected_support_exceeds_bad_support"
+    return "narrow", "bad_support_exceeds_expected_support"
 
 
 def _perturbation_spec(target_node_ids: Sequence[str], placeholder: str) -> PerturbationSpec:
@@ -571,6 +572,7 @@ def _margin_distribution_to_dict(md: MarginDistribution) -> dict[str, Any]:
                 "expected_score": c.expected_score,
                 "margin": c.margin,
                 "classification": c.classification,
+                "classification_reason": c.classification_reason,
             }
             for c in md.contributions
         ],
@@ -592,6 +594,7 @@ def _margin_distribution_from_dict(payload: Mapping[str, Any]) -> MarginDistribu
                 expected_score=item["expected_score"],
                 margin=item["margin"],
                 classification=item["classification"],
+                classification_reason=item.get("classification_reason", ""),
             )
             for item in payload.get("contributions", ())
         ),

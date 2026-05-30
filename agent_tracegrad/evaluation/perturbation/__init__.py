@@ -5,7 +5,10 @@ from agent_tracegrad.evaluation.perturbation.operators import (
     contradict_downstream,
     get_operator,
     inject_unrelated_content,
+    insert_text,
+    mask_jsonpath,
     replace_with_placeholder,
+    remove_text_span,
     swap_between_instances,
     truncate,
 )
@@ -18,7 +21,10 @@ __all__ = [
     "contradict_downstream",
     "get_operator",
     "inject_unrelated_content",
+    "insert_text",
+    "mask_jsonpath",
     "replace_with_placeholder",
+    "remove_text_span",
     "swap_between_instances",
     "truncate",
 ]

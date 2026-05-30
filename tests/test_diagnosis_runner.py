@@ -289,22 +289,34 @@ class TestComponentClassification:
     def test_positive_margin_is_narrow(self) -> None:
         from agent_tracegrad.diagnosis.runner import _classify_component
 
-        assert _classify_component(margin=1.0, expected_score=0.5, max_abs_margin=2.0, threshold=0.1) == "narrow"
+        assert _classify_component(margin=1.0, expected_score=0.5, max_abs_margin=2.0, threshold=0.1) == (
+            "narrow",
+            "bad_support_exceeds_expected_support",
+        )
 
     def test_negative_margin_is_preserve(self) -> None:
         from agent_tracegrad.diagnosis.runner import _classify_component
 
-        assert _classify_component(margin=-1.0, expected_score=0.5, max_abs_margin=2.0, threshold=0.1) == "preserve"
+        assert _classify_component(margin=-1.0, expected_score=0.5, max_abs_margin=2.0, threshold=0.1) == (
+            "preserve",
+            "expected_support_exceeds_bad_support",
+        )
 
     def test_near_zero_margin_with_expected_score_is_strengthen(self) -> None:
         from agent_tracegrad.diagnosis.runner import _classify_component
 
-        assert _classify_component(margin=0.05, expected_score=0.5, max_abs_margin=2.0, threshold=0.1) == "strengthen"
+        assert _classify_component(margin=0.05, expected_score=0.5, max_abs_margin=2.0, threshold=0.1) == (
+            "strengthen",
+            "expected_support_present_but_margin_near_zero",
+        )
 
     def test_near_zero_margin_without_expected_score_is_narrow(self) -> None:
         from agent_tracegrad.diagnosis.runner import _classify_component
 
-        assert _classify_component(margin=0.05, expected_score=0.0, max_abs_margin=2.0, threshold=0.1) == "narrow"
+        assert _classify_component(margin=0.05, expected_score=0.0, max_abs_margin=2.0, threshold=0.1) == (
+            "narrow",
+            "bad_support_exceeds_expected_support",
+        )
 
 
 class TestSerialization:
@@ -339,6 +351,7 @@ class TestSerialization:
             assert "contributions" in md
             for c in md["contributions"]:
                 assert "classification" in c
+                assert "classification_reason" in c
                 assert "margin" in c
         assert payload["bad_result"]["trace"]["nodes"]
         assert payload["bad_result"]["trace"]["spans"]

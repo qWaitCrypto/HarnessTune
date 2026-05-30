@@ -36,13 +36,13 @@ def diagnosis_to_markdown(result: DiagnosisResult) -> str:
         if negative:
             lines.append(f"- top_good_support: `{negative[0].instance_id}` margin={negative[0].margin:.6g}")
         lines.extend(["", "## Component Ranking", ""])
-        lines.append("| Rank | Component | Kind | Margin | Bad | Expected | Class |")
-        lines.append("| --- | --- | --- | ---: | ---: | ---: | --- |")
+        lines.append("| Rank | Component | Kind | Margin | Bad | Expected | Class | Reason |")
+        lines.append("| --- | --- | --- | ---: | ---: | ---: | --- | --- |")
         for rank, item in enumerate(_rank_margin(node_sum.contributions)[:12], start=1):
             lines.append(
                 f"| {rank} | `{item.instance_id}` | `{item.sub_block_kind}` | "
                 f"{item.margin:.6g} | {item.bad_score:.6g} | {item.expected_score:.6g} | "
-                f"`{item.classification}` |"
+                f"`{item.classification}` | `{item.classification_reason}` |"
             )
 
     if result.ablations:

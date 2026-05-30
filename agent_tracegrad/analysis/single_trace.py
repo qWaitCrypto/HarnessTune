@@ -179,6 +179,7 @@ def analysis_to_dict(result: SingleTraceAnalysisResult) -> dict[str, Any]:
         "trace": {
             "tokenizer_name": result.trace.tokenizer_name,
             "token_count": max((span.end_token for span in result.trace.spans), default=0),
+            "token_offsets": [list(offset) for offset in result.trace.token_offsets],
             "metadata": dict(result.trace.metadata),
         },
         "target": {
@@ -268,6 +269,7 @@ def analysis_from_artifact_dict(payload: Mapping[str, Any]) -> SingleTraceAnalys
             for item in trace_payload["spans"]
         ),
         tokenizer_name=trace_payload["tokenizer_name"],
+        token_offsets=tuple(tuple(item) for item in trace_payload.get("token_offsets", ())),
         metadata=trace_payload.get("metadata") or {},
     )
     target_payload = payload["target"]

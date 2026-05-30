@@ -24,6 +24,7 @@ class BoundaryComponent:
     margin: float
     bad_score: float
     expected_score: float
+    classification_reason: str = ""
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "node_ids", tuple(self.node_ids))
@@ -180,6 +181,7 @@ def _component_from_margin(contribution: MarginContribution) -> BoundaryComponen
         margin=contribution.margin,
         bad_score=contribution.bad_score,
         expected_score=contribution.expected_score,
+        classification_reason=contribution.classification_reason,
     )
 
 
@@ -201,6 +203,7 @@ def _component_to_dict(component: BoundaryComponent) -> dict[str, Any]:
         "margin": component.margin,
         "bad_score": component.bad_score,
         "expected_score": component.expected_score,
+        "classification_reason": component.classification_reason,
     }
 
 
@@ -208,11 +211,11 @@ def _append_component_table(lines: list[str], components: Sequence[BoundaryCompo
     if not components:
         lines.append("_None._")
         return
-    lines.append("| Component | Kind | Direction | Margin | Bad | Expected | Class |")
-    lines.append("| --- | --- | --- | ---: | ---: | ---: | --- |")
+    lines.append("| Component | Kind | Direction | Margin | Bad | Expected | Class | Reason |")
+    lines.append("| --- | --- | --- | ---: | ---: | ---: | --- | --- |")
     for item in components:
         lines.append(
             f"| `{item.component_id}` | `{item.sub_block_kind}` | `{item.direction}` | "
             f"{item.margin:.6g} | {item.bad_score:.6g} | {item.expected_score:.6g} | "
-            f"`{item.classification}` |"
+            f"`{item.classification}` | `{item.classification_reason}` |"
         )

@@ -47,6 +47,46 @@ def contradict_downstream(node: TraceNode, parameters: Mapping[str, Any], tokeni
     return node.content.replace(original, replacement, 1)
 
 
+def remove_text_span(node: TraceNode, parameters: Mapping[str, Any], tokenizer: OffsetTokenizer) -> str:
+    del tokenizer
+    start = parameters.get("start")
+    end = parameters.get("end")
+    if not isinstance(start, int) or not isinstance(end, int):
+        raise ValueError("remove_text_span requires integer parameters 'start' and 'end'")
+    if start < 0 or end < start or end > len(node.content):
+        raise ValueError("remove_text_span requires a valid half-open character range")
+    return node.content[:start] + node.content[end:]
+
+
+def insert_text(node: TraceNode, parameters: Mapping[str, Any], tokenizer: OffsetTokenizer) -> str:
+    del tokenizer
+    position = parameters.get("position")
+    text = parameters.get("text")
+    if not isinstance(position, int):
+        raise ValueError("insert_text requires integer parameter 'position'")
+    if not isinstance(text, str) or not text:
+        raise ValueError("insert_text requires non-empty string parameter 'text'")
+    if position < 0 or position > len(node.content):
+        raise ValueError("insert_text position must fall inside target node content")
+    return node.content[:position] + text + node.content[position:]
+
+
+def mask_jsonpath(node: TraceNode, parameters: Mapping[str, Any], tokenizer: OffsetTokenizer) -> str:
+    del tokenizer
+    jsonpath = parameters.get("jsonpath")
+    replacement = parameters.get("replacement", "null")
+    if not isinstance(jsonpath, str) or not jsonpath:
+        raise ValueError("mask_jsonpath requires non-empty string parameter 'jsonpath'")
+    if not isinstance(replacement, str) or not replacement:
+        raise ValueError("mask_jsonpath parameter 'replacement' must be a non-empty string")
+    spans = _json_source_spans(node.content)
+    span = spans.get(jsonpath)
+    if span is None:
+        raise ValueError(f"mask_jsonpath could not find JSONPath {jsonpath!r}")
+    start, end = span
+    return node.content[:start] + replacement + node.content[end:]
+
+
 def inject_unrelated_content(node: TraceNode, parameters: Mapping[str, Any], tokenizer: OffsetTokenizer) -> str:
     del tokenizer
     content = parameters.get("content")
@@ -72,6 +112,9 @@ def swap_between_instances(node: TraceNode, parameters: Mapping[str, Any], token
 OPERATORS: Mapping[str, PerturbationOperator] = {
     "contradict_downstream": contradict_downstream,
     "inject_unrelated_content": inject_unrelated_content,
+    "insert_text": insert_text,
+    "mask_jsonpath": mask_jsonpath,
+    "remove_text_span": remove_text_span,
     "replace_with_placeholder": replace_with_placeholder,
     "swap_between_instances": swap_between_instances,
     "truncate": truncate,
@@ -93,3 +136,9 @@ def _coerce_offset(offset: Any) -> tuple[int, int]:
     if start < 0 or end < start:
         raise ValueError("tokenizer offsets must be non-negative half-open ranges")
     return start, end
+
+
+def _json_source_spans(text: str) -> Mapping[str, tuple[int, int]]:
+    from agent_tracegrad.diagnosis.atomizer import _json_source_spans as json_source_spans
+
+    return json_source_spans(text)

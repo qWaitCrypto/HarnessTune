@@ -211,7 +211,7 @@ def _margin_bar(item: MarginContribution, *, max_abs: float) -> str:
         "<div class='bar-row'>"
         f"<code>{_e(item.instance_id)}</code>"
         f"<div class='bar-track'><div class='bar-fill {tone}' style='width:{width:.1f}%'></div></div>"
-        f"<strong>{_fmt(item.margin)}</strong>"
+        f"<strong title='{_e(item.classification_reason)}'>{_fmt(item.margin)}</strong>"
         "</div>"
     )
 

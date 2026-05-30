@@ -158,6 +158,7 @@ def _attribute_with_gradients(
         target_id=target.target_id,
         token_scores=tuple(token_scores.detach().cpu().tolist()),
         metadata={
+            **_score_method_metadata(method_name, objective_type="bad_action"),
             "loss": float(loss.detach().cpu()),
             "target_node_ids": tuple(target.node_ids),
             "target_span": target.span,
@@ -205,7 +206,10 @@ def _attribute_objective_with_gradients(
         same_model=execution_model_name is not None and model.name == execution_model_name,
         target_id=objective.objective_id,
         token_scores=tuple(token_scores.detach().cpu().tolist()),
-        metadata=_objective_result_metadata(objective, loss),
+        metadata={
+            **_score_method_metadata(method_name, objective_type=objective.objective_type),
+            **_objective_result_metadata(objective, loss),
+        },
     )
     result.validate_against_trace(trace)
     return result
@@ -246,6 +250,7 @@ def _attribute_integrated_gradients(
         target_id=target.target_id,
         token_scores=tuple(token_scores.detach().cpu().tolist()),
         metadata={
+            **_score_method_metadata("integrated_gradients", objective_type="bad_action"),
             "steps": steps,
             "target_node_ids": tuple(target.node_ids),
             "target_span": target.span,
@@ -300,6 +305,7 @@ def _attribute_objective_integrated_gradients(
         target_id=objective.objective_id,
         token_scores=tuple(token_scores.detach().cpu().tolist()),
         metadata={
+            **_score_method_metadata("integrated_gradients", objective_type=objective.objective_type),
             **_objective_result_metadata(objective, loss),
             "steps": steps,
         },
@@ -588,6 +594,7 @@ def _anchored_objective_result_from_scores(
         target_id=objective.objective_id,
         token_scores=tuple(token_scores.detach().cpu().tolist()),
         metadata={
+            **_score_method_metadata(method_name, objective_type=objective.objective_type),
             **_objective_result_metadata(objective, loss),
             **_anchored_objective_metadata(objective_input),
             **(metadata or {}),
@@ -687,6 +694,7 @@ def _attribute_anchored_objective_integrated_gradients(
         final_loss,
         prefix_scores,
         metadata={
+            **_score_method_metadata("integrated_gradients", objective_type=objective.objective_type),
             **(metadata or {}),
             "steps": steps,
         },
@@ -758,6 +766,26 @@ def _objective_result_metadata(objective: TargetObjective, loss) -> dict:
         "objective": payload,
         "objective_type": objective.objective_type,
         "objective_formula": payload["objective_formula"],
+    }
+
+
+def _score_method_metadata(method_name: str, *, objective_type: str) -> dict:
+    score_family_by_method = {
+        "gradient_saliency": "sensitivity",
+        "gradient_times_input": "local_contribution",
+        "integrated_gradients": "path_integrated_contribution",
+    }
+    base_method_by_method = {
+        "gradient_saliency": "norm_saliency",
+        "gradient_times_input": "gradient_x_input",
+        "integrated_gradients": "integrated_gradients",
+    }
+    score_method = base_method_by_method.get(method_name, method_name)
+    if objective_type == "contrastive":
+        score_method = f"branch_difference_{score_method}"
+    return {
+        "score_method": score_method,
+        "score_family": score_family_by_method.get(method_name, "unknown"),
     }
 
 

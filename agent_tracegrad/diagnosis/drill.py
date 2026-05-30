@@ -50,6 +50,7 @@ def run_drill(
             bad_score, token_count = _score_atom(diagnosis.bad_result, atom)
             expected_score, _ = _score_atom(diagnosis.expected_result, atom)
             margin, _ = _score_atom(diagnosis.contrastive_result, atom)
+            classification, _ = _classify_atom(margin, expected_score, atoms)
             atoms.append(
                 AtomAttribution(
                     atom=atom,
@@ -58,7 +59,7 @@ def run_drill(
                     bad_score=bad_score,
                     expected_score=expected_score,
                     margin=margin,
-                    classification=_classify_atom(margin, expected_score, atoms),
+                    classification=classification,
                 )
             )
     ranked = tuple(sorted(atoms, key=lambda item: (-abs(item.margin), item.atom.atom_id)))
@@ -135,9 +136,8 @@ def _score_atom(analysis: SingleTraceAnalysisResult, atom: ComponentAtom) -> tup
     if span is None:
         return 0.0, 0
     token_indexes = _atom_token_indexes(
-        analysis.trace.serialized_text,
+        analysis.trace.token_offsets,
         span.text_start_char,
-        span.text_end_char,
         span.start_token,
         span.end_token,
         atom.char_start,
@@ -147,75 +147,37 @@ def _score_atom(analysis: SingleTraceAnalysisResult, atom: ComponentAtom) -> tup
 
 
 def _atom_token_indexes(
-    serialized_text: str,
+    token_offsets: Sequence[tuple[int, int]],
     node_char_start: int | None,
-    node_char_end: int | None,
     node_token_start: int,
     node_token_end: int,
     atom_char_start: int,
     atom_char_end: int,
 ) -> tuple[int, ...]:
-    if node_char_start is None or node_char_end is None or node_char_end <= node_char_start:
+    if not token_offsets:
+        raise ValueError("SerializedTrace.token_offsets are required for exact drill attribution")
+    if node_char_start is None:
         return ()
-    token_count = node_token_end - node_token_start
-    if token_count <= 0:
+    if node_token_end <= node_token_start:
         return ()
     abs_start = node_char_start + atom_char_start
     abs_end = node_char_start + atom_char_end
-    offsets = _token_char_offsets(
-        serialized_text,
-        node_char_start,
-        node_char_end,
-        token_count=token_count,
-    )
     indexes: list[int] = []
-    for offset_index, (start, end) in enumerate(offsets):
+    for token_index in range(node_token_start, node_token_end):
+        start, end = token_offsets[token_index]
         if start < abs_end and end > abs_start:
-            indexes.append(node_token_start + offset_index)
+            indexes.append(token_index)
     return tuple(indexes)
-
-
-def _token_char_offsets(
-    text: str,
-    char_start: int,
-    char_end: int,
-    *,
-    token_count: int,
-) -> tuple[tuple[int, int], ...]:
-    words = list(_word_offsets(text, char_start, char_end))
-    if len(words) == token_count:
-        return tuple(words)
-    width = max(1, char_end - char_start)
-    return tuple(
-        (
-            char_start + int(width * index / token_count),
-            char_start + int(width * (index + 1) / token_count),
-        )
-        for index in range(token_count)
-    )
-
-
-def _word_offsets(text: str, start: int, end: int):
-    cursor = start
-    while cursor < end:
-        while cursor < end and text[cursor].isspace():
-            cursor += 1
-        if cursor >= end:
-            break
-        token_start = cursor
-        while cursor < end and not text[cursor].isspace():
-            cursor += 1
-        yield token_start, cursor
 
 
 def _classify_atom(
     margin: float,
     expected_score: float,
     existing_atoms: Sequence[AtomAttribution],
-) -> ComponentClassification:
+) -> tuple[ComponentClassification, str]:
     max_abs = max([abs(item.margin) for item in existing_atoms] + [abs(margin)], default=0.0)
     if max_abs > 0.0 and abs(margin) < 0.1 * max_abs and expected_score > 0.0:
-        return "strengthen"
+        return "strengthen", "expected_support_present_but_margin_near_zero"
     if margin < 0.0:
-        return "preserve"
-    return "narrow"
+        return "preserve", "expected_support_exceeds_bad_support"
+    return "narrow", "bad_support_exceeds_expected_support"

@@ -29,6 +29,7 @@ class MarginContribution:
     expected_score: float
     margin: float
     classification: ComponentClassification
+    classification_reason: str = ""
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "node_ids", tuple(self.node_ids))

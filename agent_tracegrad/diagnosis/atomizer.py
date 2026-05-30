@@ -78,8 +78,9 @@ def atomize_tool_schema(node: TraceNode) -> tuple[ComponentAtom, ...]:
     parsed = _try_parse_json(node.content)
     if parsed is None:
         return _fallback_tool_schema_atoms(node)
+    source_spans = _json_source_spans(node.content)
     atoms: list[ComponentAtom] = []
-    _collect_json_atoms(node, parsed, "$", atoms)
+    _collect_json_atoms(node, parsed, "$", atoms, source_spans)
     return tuple(atoms) if atoms else _fallback_tool_schema_atoms(node)
 
 
@@ -116,34 +117,45 @@ def _try_parse_json(text: str) -> Any | None:
         return None
 
 
-def _collect_json_atoms(node: TraceNode, value: Any, path: str, atoms: list[ComponentAtom]) -> None:
+def _collect_json_atoms(
+    node: TraceNode,
+    value: Any,
+    path: str,
+    atoms: list[ComponentAtom],
+    source_spans: Mapping[str, tuple[int, int]],
+) -> None:
     if isinstance(value, Mapping):
         for key, child in value.items():
             child_path = f"{path}.{key}" if path != "$" else f"$.{key}"
             if _is_scalar_like(child):
-                _append_json_atom(node, atoms, child_path, child)
+                _append_json_atom(node, atoms, child_path, source_spans)
             else:
-                _collect_json_atoms(node, child, child_path, atoms)
+                _collect_json_atoms(node, child, child_path, atoms, source_spans)
         return
     if isinstance(value, list):
         for index, child in enumerate(value):
             child_path = f"{path}[{index}]"
             if _is_scalar_like(child):
-                _append_json_atom(node, atoms, child_path, child)
+                _append_json_atom(node, atoms, child_path, source_spans)
             else:
-                _collect_json_atoms(node, child, child_path, atoms)
+                _collect_json_atoms(node, child, child_path, atoms, source_spans)
         return
-    _append_json_atom(node, atoms, path, value)
+    _append_json_atom(node, atoms, path, source_spans)
 
 
-def _append_json_atom(node: TraceNode, atoms: list[ComponentAtom], path: str, value: Any) -> None:
-    text = str(value)
-    if not text:
-        return
-    match = _find_text(node.content, text)
+def _append_json_atom(
+    node: TraceNode,
+    atoms: list[ComponentAtom],
+    path: str,
+    source_spans: Mapping[str, tuple[int, int]],
+) -> None:
+    match = source_spans.get(path)
     if match is None:
         return
     start, end = match
+    text = node.content[start:end]
+    if not text:
+        return
     atoms.append(
         _atom(
             node,
@@ -194,15 +206,88 @@ def _is_scalar_like(value: Any) -> bool:
     return value is None or isinstance(value, str | int | float | bool)
 
 
-def _find_text(haystack: str, needle: str) -> tuple[int, int] | None:
-    start = haystack.find(needle)
-    if start < 0:
-        escaped = json.dumps(needle)[1:-1]
-        start = haystack.find(escaped)
-        if start < 0:
-            return None
-        return start, start + len(escaped)
-    return start, start + len(needle)
+def _json_source_spans(text: str) -> Mapping[str, tuple[int, int]]:
+    parser = _JsonSpanParser(text)
+    spans = parser.parse()
+    return MappingProxyType(spans)
+
+
+class _JsonSpanParser:
+    def __init__(self, text: str) -> None:
+        self.text = text
+        self.decoder = json.JSONDecoder()
+        self.spans: dict[str, tuple[int, int]] = {}
+
+    def parse(self) -> dict[str, tuple[int, int]]:
+        value, end = self._parse_value(self._skip_ws(0), "$")
+        del value
+        if self._skip_ws(end) != len(self.text):
+            raise ValueError("extra data after JSON document")
+        return self.spans
+
+    def _parse_value(self, index: int, path: str) -> tuple[Any, int]:
+        index = self._skip_ws(index)
+        if index >= len(self.text):
+            raise ValueError("unexpected end of JSON document")
+        char = self.text[index]
+        if char == "{":
+            return self._parse_object(index, path)
+        if char == "[":
+            return self._parse_array(index, path)
+        value, end = self.decoder.raw_decode(self.text, index)
+        self.spans[path] = (index, end)
+        return value, end
+
+    def _parse_object(self, index: int, path: str) -> tuple[dict[str, Any], int]:
+        result: dict[str, Any] = {}
+        cursor = self._skip_ws(index + 1)
+        if self._peek(cursor) == "}":
+            return result, cursor + 1
+        while True:
+            key, cursor = self.decoder.raw_decode(self.text, cursor)
+            if not isinstance(key, str):
+                raise ValueError("JSON object key must be a string")
+            cursor = self._skip_ws(cursor)
+            if self._peek(cursor) != ":":
+                raise ValueError("expected ':' after JSON object key")
+            child_path = f"{path}.{key}" if path != "$" else f"$.{key}"
+            value, cursor = self._parse_value(cursor + 1, child_path)
+            result[key] = value
+            cursor = self._skip_ws(cursor)
+            char = self._peek(cursor)
+            if char == "}":
+                return result, cursor + 1
+            if char != ",":
+                raise ValueError("expected ',' or '}' in JSON object")
+            cursor = self._skip_ws(cursor + 1)
+
+    def _parse_array(self, index: int, path: str) -> tuple[list[Any], int]:
+        result: list[Any] = []
+        cursor = self._skip_ws(index + 1)
+        if self._peek(cursor) == "]":
+            return result, cursor + 1
+        array_index = 0
+        while True:
+            value, cursor = self._parse_value(cursor, f"{path}[{array_index}]")
+            result.append(value)
+            array_index += 1
+            cursor = self._skip_ws(cursor)
+            char = self._peek(cursor)
+            if char == "]":
+                return result, cursor + 1
+            if char != ",":
+                raise ValueError("expected ',' or ']' in JSON array")
+            cursor = self._skip_ws(cursor + 1)
+
+    def _skip_ws(self, index: int) -> int:
+        while index < len(self.text) and self.text[index].isspace():
+            index += 1
+        return index
+
+    def _peek(self, index: int) -> str:
+        if index >= len(self.text):
+            raise ValueError("unexpected end of JSON document")
+        return self.text[index]
 
 
 def _atom(
