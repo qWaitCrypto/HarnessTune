@@ -163,15 +163,32 @@ def _views(scores: Sequence[float], *, topk: int) -> Mapping[str, float]:
 
 
 def _distribution_stats(scores: Sequence[float]) -> Mapping[str, float]:
+    zero_stats = {
+        "entropy": 0.0,
+        "top1_mass": 0.0,
+        "top3_mass": 0.0,
+        "gini": 0.0,
+        "positive_mass": 0.0,
+        "negative_mass": 0.0,
+        "net_direction": 0.0,
+    }
     if not scores:
-        return {"entropy": 0.0, "top1_mass": 0.0, "top3_mass": 0.0, "gini": 0.0}
+        return zero_stats
     if any(not isfinite(score) for score in scores):
         nan = float("nan")
-        return {"entropy": nan, "top1_mass": nan, "top3_mass": nan, "gini": nan}
+        return {
+            "entropy": nan,
+            "top1_mass": nan,
+            "top3_mass": nan,
+            "gini": nan,
+            "positive_mass": nan,
+            "negative_mass": nan,
+            "net_direction": nan,
+        }
     abs_scores = [abs(score) for score in scores]
     total = sum(abs_scores)
     if total == 0.0:
-        return {"entropy": 0.0, "top1_mass": 0.0, "top3_mass": 0.0, "gini": 0.0}
+        return zero_stats
     probabilities = [score / total for score in abs_scores if score > 0.0]
     entropy = -sum(probability * log(probability) for probability in probabilities)
     sorted_probabilities = sorted((score / total for score in abs_scores), reverse=True)

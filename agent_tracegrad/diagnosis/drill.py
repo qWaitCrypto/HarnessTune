@@ -42,7 +42,7 @@ def run_drill(
     if diagnosis.expected_result is None or diagnosis.contrastive_result is None:
         raise ValueError("drill requires a full diagnosis with expected and contrastive results")
     allowed_kinds = set(include_sub_block_kinds)
-    atoms: list[AtomAttribution] = []
+    pending_atoms: list[tuple[ComponentAtom, str, int, float, float, float]] = []
     for node in sorted(diagnosis.contrastive_result.trace.nodes.values(), key=lambda item: (item.sequence_index or 0, item.node_id)):
         if node.sub_block_kind not in allowed_kinds:
             continue
@@ -50,18 +50,26 @@ def run_drill(
             bad_score, token_count = _score_atom(diagnosis.bad_result, atom)
             expected_score, _ = _score_atom(diagnosis.expected_result, atom)
             margin, _ = _score_atom(diagnosis.contrastive_result, atom)
-            classification, _ = _classify_atom(margin, expected_score, atoms)
-            atoms.append(
-                AtomAttribution(
-                    atom=atom,
-                    sub_block_kind=node.sub_block_kind,
-                    token_count=token_count,
-                    bad_score=bad_score,
-                    expected_score=expected_score,
-                    margin=margin,
-                    classification=classification,
-                )
+            pending_atoms.append((atom, node.sub_block_kind, token_count, bad_score, expected_score, margin))
+    max_abs_margin = max((abs(margin) for *_, margin in pending_atoms), default=0.0)
+    atoms: list[AtomAttribution] = []
+    for atom, sub_block_kind, token_count, bad_score, expected_score, margin in pending_atoms:
+        classification, _ = _classify_atom(
+            margin,
+            expected_score,
+            max_abs_margin=max_abs_margin,
+        )
+        atoms.append(
+            AtomAttribution(
+                atom=atom,
+                sub_block_kind=sub_block_kind,
+                token_count=token_count,
+                bad_score=bad_score,
+                expected_score=expected_score,
+                margin=margin,
+                classification=classification,
             )
+        )
     ranked = tuple(sorted(atoms, key=lambda item: (-abs(item.margin), item.atom.atom_id)))
     return DrillResult(
         atoms=ranked,
@@ -173,10 +181,9 @@ def _atom_token_indexes(
 def _classify_atom(
     margin: float,
     expected_score: float,
-    existing_atoms: Sequence[AtomAttribution],
+    max_abs_margin: float,
 ) -> tuple[ComponentClassification, str]:
-    max_abs = max([abs(item.margin) for item in existing_atoms] + [abs(margin)], default=0.0)
-    if max_abs > 0.0 and abs(margin) < 0.1 * max_abs and expected_score > 0.0:
+    if max_abs_margin > 0.0 and abs(margin) < 0.1 * max_abs_margin and expected_score > 0.0:
         return "strengthen", "expected_support_present_but_margin_near_zero"
     if margin < 0.0:
         return "preserve", "expected_support_exceeds_bad_support"

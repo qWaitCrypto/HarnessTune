@@ -5,7 +5,9 @@ import math
 import pytest
 
 from agent_tracegrad.analysis import aggregate_attribution, rank_distribution
+from agent_tracegrad.analysis.single_trace import analysis_to_dict
 from agent_tracegrad.attribution import AttributionResult
+from agent_tracegrad.target import FailureTarget
 from agent_tracegrad.trace import SpanMetadata, SerializedTrace, TraceNode
 
 
@@ -154,6 +156,68 @@ def test_signed_distribution_stats_use_abs_mass_without_nan() -> None:
     assert node_sum.distribution_stats["positive_mass"] == pytest.approx(4.0 / 13.0)
     assert node_sum.distribution_stats["negative_mass"] == pytest.approx(9.0 / 13.0)
     assert node_sum.distribution_stats["net_direction"] == pytest.approx(-5.0 / 13.0)
+
+
+def test_zero_distribution_stats_preserve_signed_schema() -> None:
+    trace = make_trace()
+    result = AttributionResult(
+        method_name="gradient",
+        attribution_model_name="tiny-model",
+        execution_model_name="tiny-model",
+        same_model=True,
+        target_id="target-1",
+        token_scores=(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
+    )
+
+    node_sum = by_key(aggregate_attribution(trace, result), grain="node", view_name="sum")
+
+    assert node_sum.distribution_stats == {
+        "entropy": 0.0,
+        "top1_mass": 0.0,
+        "top3_mass": 0.0,
+        "gini": 0.0,
+        "positive_mass": 0.0,
+        "negative_mass": 0.0,
+        "net_direction": 0.0,
+    }
+
+
+def test_signed_aggregation_views_are_preserved_in_analysis_artifact() -> None:
+    from agent_tracegrad.analysis.single_trace import AnalysisRanking, SingleTraceAnalysisResult
+
+    trace = make_trace()
+    result = AttributionResult(
+        method_name="gradient",
+        attribution_model_name="tiny-model",
+        execution_model_name="tiny-model",
+        same_model=True,
+        target_id="target-1",
+        token_scores=(-5.0, -2.0, 4.0, 1.0, -3.0, 0.0, 0.0),
+    )
+    distributions = aggregate_attribution(trace, result, topk=1)
+    analysis = SingleTraceAnalysisResult(
+        trace=trace,
+        target=FailureTarget("target-1", ("agent-1",)),
+        attribution=result,
+        distributions=distributions,
+        rankings=(
+            AnalysisRanking(grain="node", view_name="sum", items=()),
+        ),
+        metadata={},
+    )
+
+    payload = analysis_to_dict(analysis)
+    node_instances = next(
+        distribution["instances"]
+        for distribution in payload["distributions"]
+        if distribution["grain"] == "node" and distribution["view_name"] == "sum"
+    )
+    sys_1 = next(item for item in node_instances if item["instance_id"] == "sys-1")
+
+    assert sys_1["views"]["positive_sum"] == 0.0
+    assert sys_1["views"]["negative_sum"] == -7.0
+    assert sys_1["views"]["abs_sum"] == 7.0
+    assert sys_1["views"]["net_sum"] == -7.0
 
 
 def test_rank_distribution_can_rank_by_abs_positive_or_negative() -> None:

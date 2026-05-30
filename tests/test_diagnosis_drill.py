@@ -4,8 +4,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from agent_tracegrad.attribution import AttributionResult
+from agent_tracegrad.analysis.single_trace import SingleTraceAnalysisResult
 from agent_tracegrad.diagnosis import atomize_policy_text, atomize_tool_schema, run_diagnosis, run_drill
+from agent_tracegrad.diagnosis.types import DiagnosisResult
 from agent_tracegrad.model.adapter import ModelForwardOutput, TokenizedOutput
+from agent_tracegrad.target import FailureTarget
+from agent_tracegrad.trace import SpanMetadata, SerializedTrace
 from agent_tracegrad.trace.schema import TraceNode
 
 import pytest
@@ -135,3 +140,113 @@ def test_run_drill_produces_atom_scores() -> None:
     assert result.atoms
     assert all(atom.token_count >= 1 for atom in result.atoms)
     assert {atom.classification for atom in result.atoms} <= {"preserve", "narrow", "strengthen"}
+
+
+def test_run_drill_classification_is_not_atom_order_sensitive() -> None:
+    first = _make_order_sensitive_diagnosis(("small", "large"))
+    second = _make_order_sensitive_diagnosis(("large", "small"))
+
+    first_classes = {
+        atom.atom.text.removeprefix("- "): atom.classification
+        for atom in run_drill(first).atoms
+    }
+    second_classes = {
+        atom.atom.text.removeprefix("- "): atom.classification
+        for atom in run_drill(second).atoms
+    }
+
+    assert first_classes == second_classes
+    assert first_classes["small"] == "strengthen"
+    assert first_classes["large"] == "narrow"
+
+
+def _make_order_sensitive_diagnosis(order: tuple[str, str]) -> DiagnosisResult:
+    content = "\n".join(f"- {name}" for name in order)
+    offsets: list[tuple[int, int]] = []
+    cursor = 0
+    for token in content.split():
+        start = content.index(token, cursor)
+        end = start + len(token)
+        offsets.append((start, end))
+        cursor = end
+    trace = SerializedTrace(
+        nodes={
+            "policy": TraceNode(
+                "policy",
+                "system",
+                "system.instruction",
+                content,
+                sequence_index=0,
+            ),
+            "agent": TraceNode(
+                "agent",
+                "agent",
+                "agent.content",
+                "bad",
+                sequence_index=1,
+            ),
+        },
+        serialized_text=content,
+        spans=(
+            SpanMetadata(
+                "span-policy",
+                "policy",
+                "system",
+                "system.instruction",
+                0,
+                len(offsets),
+                text_start_char=0,
+                text_end_char=len(content),
+            ),
+            SpanMetadata(
+                "span-agent",
+                "agent",
+                "agent",
+                "agent.content",
+                len(offsets),
+                len(offsets),
+            ),
+        ),
+        tokenizer_name="test-tokenizer",
+        token_offsets=tuple(offsets),
+    )
+    margin_by_name = {"small": 0.5, "large": 10.0}
+    expected_by_name = {"small": 1.0, "large": 1.0}
+    margin_scores = tuple(
+        margin_by_name.get(content[start:end].lstrip("- "), 0.0)
+        for start, end in offsets
+    )
+    expected_scores = tuple(
+        expected_by_name.get(content[start:end].lstrip("- "), 0.0)
+        for start, end in offsets
+    )
+    zero_scores = tuple(0.0 for _ in offsets)
+    target = FailureTarget("target", ("agent",))
+    return DiagnosisResult(
+        bad_result=_analysis(trace, target, zero_scores),
+        expected_result=_analysis(trace, target, expected_scores),
+        contrastive_result=_analysis(trace, target, margin_scores),
+        margin_distributions=(),
+    )
+
+
+def _analysis(
+    trace: SerializedTrace,
+    target: FailureTarget,
+    token_scores: tuple[float, ...],
+) -> SingleTraceAnalysisResult:
+    return SingleTraceAnalysisResult(
+        trace=trace,
+        target=target,
+        attribution=AttributionResult(
+            method_name="gradient_saliency",
+            attribution_model_name="test-model",
+            execution_model_name=None,
+            same_model=False,
+            target_id=target.target_id,
+            token_scores=token_scores,
+        ),
+        distributions=(),
+        rankings=(),
+        metadata={},
+    )
