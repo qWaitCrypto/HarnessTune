@@ -39,132 +39,29 @@ def build_parser() -> argparse.ArgumentParser:
     )
     subparsers = parser.add_subparsers(dest="command")
     analyze = subparsers.add_parser("analyze", help="Analyze one failed trace.")
-    analyze.add_argument("--trace", required=True, help="Path to a trace JSON file.")
-    analyze.add_argument(
-        "--input-format",
-        choices=trace_adapter_names(),
-        default="json-fixture",
-        help="Trace adapter to use before analysis.",
-    )
-    analyze.add_argument("--model", required=True, help="Local HuggingFace causal LM path or model name.")
-    analyze.add_argument("--target-node-id", action="append", help="Agent node id to explain.")
-    analyze.add_argument(
-        "--target-marker",
-        choices=failure_target_marker_names(),
-        default=None,
-        help="Failure target marker to use when --target-node-id is omitted.",
-    )
+    _add_trace_args(analyze, trace_arg="--trace", input_help="Trace adapter to use before analysis.")
+    _add_model_args(analyze)
+    _add_target_args(analyze)
     analyze.add_argument("--output", required=True, help="Path to write analysis JSON.")
     _add_objective_args(analyze)
-    analyze.add_argument(
-        "--method",
-        choices=("gradient_saliency", "gradient_times_input", "integrated_gradients"),
-        default="gradient_saliency",
-        help="Attribution method to run.",
-    )
-    analyze.add_argument("--execution-model-name", default=None, help="Optional execution model identity.")
-    analyze.add_argument("--device", default=None, help="Torch device passed to the HF adapter, for example cuda:0.")
-    analyze.add_argument(
-        "--devices",
-        default=None,
-        help="Comma-separated CUDA devices for model sharding, for example cuda:0,cuda:1.",
-    )
-    analyze.add_argument("--dtype", choices=("float16", "bfloat16", "float32"), default=None)
-    analyze.add_argument("--ig-steps", type=int, default=16, help="Integrated-gradient steps when selected.")
-    analyze.add_argument("--topk-mean-k", type=int, default=5, help="k for the topk_mean aggregation view.")
-    analyze.add_argument("--ranking-grain", choices=("node", "sub_block_kind"), default="node")
-    analyze.add_argument(
-        "--ranking-view",
-        choices=("sum", "mean", "length_norm", "topk_mean"),
-        default="sum",
-    )
-    analyze.add_argument("--trust-remote-code", action="store_true", help="Pass trust_remote_code=True to transformers.")
+    _add_attribution_args(analyze)
     diagnose = subparsers.add_parser("diagnose", help="Run a multi-objective diagnosis for one failed trace.")
-    diagnose.add_argument("--trace", required=True, help="Path to a trace JSON file.")
-    diagnose.add_argument(
-        "--input-format",
-        choices=trace_adapter_names(),
-        default="json-fixture",
-        help="Trace adapter to use before diagnosis.",
-    )
-    diagnose.add_argument("--model", required=True, help="Local HuggingFace causal LM path or model name.")
-    diagnose.add_argument("--target-node-id", action="append", help="Agent node id to explain.")
-    diagnose.add_argument(
-        "--target-marker",
-        choices=failure_target_marker_names(),
-        default=None,
-        help="Failure target marker to use when --target-node-id is omitted.",
-    )
-    diagnose.add_argument("--output-dir", required=True, help="Directory to write diagnosis artifacts.")
-    diagnose.add_argument("--output-prefix", default="tracegrad-diagnosis", help="Artifact filename prefix.")
+    _add_trace_args(diagnose, trace_arg="--trace", input_help="Trace adapter to use before diagnosis.")
+    _add_model_args(diagnose)
+    _add_target_args(diagnose)
+    _add_output_dir_args(diagnose, default_prefix="tracegrad-diagnosis", noun="diagnosis")
     _add_objective_args(diagnose)
-    diagnose.add_argument(
-        "--method",
-        choices=("gradient_saliency", "gradient_times_input", "integrated_gradients"),
-        default="gradient_saliency",
-        help="Attribution method to run.",
-    )
-    diagnose.add_argument("--execution-model-name", default=None, help="Optional execution model identity.")
-    diagnose.add_argument("--device", default=None, help="Torch device passed to the HF adapter, for example cuda:0.")
-    diagnose.add_argument(
-        "--devices",
-        default=None,
-        help="Comma-separated CUDA devices for model sharding, for example cuda:0,cuda:1.",
-    )
-    diagnose.add_argument("--dtype", choices=("float16", "bfloat16", "float32"), default=None)
-    diagnose.add_argument("--ig-steps", type=int, default=16, help="Integrated-gradient steps when selected.")
-    diagnose.add_argument("--topk-mean-k", type=int, default=5, help="k for the topk_mean aggregation view.")
-    diagnose.add_argument("--ranking-grain", choices=("node", "sub_block_kind"), default="node")
-    diagnose.add_argument(
-        "--ranking-view",
-        choices=("sum", "mean", "length_norm", "topk_mean"),
-        default="sum",
-    )
+    _add_attribution_args(diagnose)
     diagnose.add_argument("--ablation-k", action="append", type=int, default=None, help="k values for diagnosis ablation.")
     diagnose.add_argument("--control-ablation", action="store_true", help="Also ablate low-ranked control nodes.")
     diagnose.add_argument("--ablation-placeholder", default="[ABLATE]", help="Replacement text for ablated nodes.")
-    diagnose.add_argument("--trust-remote-code", action="store_true", help="Pass trust_remote_code=True to transformers.")
     drill = subparsers.add_parser("drill", help="Run policy/tool atom drill-down for one failed trace.")
-    drill.add_argument("--trace", required=True, help="Path to a trace JSON file.")
-    drill.add_argument(
-        "--input-format",
-        choices=trace_adapter_names(),
-        default="json-fixture",
-        help="Trace adapter to use before drill-down.",
-    )
-    drill.add_argument("--model", required=True, help="Local HuggingFace causal LM path or model name.")
-    drill.add_argument("--target-node-id", action="append", help="Agent node id to explain.")
-    drill.add_argument(
-        "--target-marker",
-        choices=failure_target_marker_names(),
-        default=None,
-        help="Failure target marker to use when --target-node-id is omitted.",
-    )
-    drill.add_argument("--output-dir", required=True, help="Directory to write drill artifacts.")
-    drill.add_argument("--output-prefix", default="tracegrad-drill", help="Artifact filename prefix.")
+    _add_trace_args(drill, trace_arg="--trace", input_help="Trace adapter to use before drill-down.")
+    _add_model_args(drill)
+    _add_target_args(drill)
+    _add_output_dir_args(drill, default_prefix="tracegrad-drill", noun="drill")
     _add_objective_args(drill)
-    drill.add_argument(
-        "--method",
-        choices=("gradient_saliency", "gradient_times_input", "integrated_gradients"),
-        default="gradient_saliency",
-        help="Attribution method to run.",
-    )
-    drill.add_argument("--execution-model-name", default=None, help="Optional execution model identity.")
-    drill.add_argument("--device", default=None, help="Torch device passed to the HF adapter, for example cuda:0.")
-    drill.add_argument(
-        "--devices",
-        default=None,
-        help="Comma-separated CUDA devices for model sharding, for example cuda:0,cuda:1.",
-    )
-    drill.add_argument("--dtype", choices=("float16", "bfloat16", "float32"), default=None)
-    drill.add_argument("--ig-steps", type=int, default=16, help="Integrated-gradient steps when selected.")
-    drill.add_argument("--topk-mean-k", type=int, default=5, help="k for the topk_mean aggregation view.")
-    drill.add_argument("--ranking-grain", choices=("node", "sub_block_kind"), default="node")
-    drill.add_argument(
-        "--ranking-view",
-        choices=("sum", "mean", "length_norm", "topk_mean"),
-        default="sum",
-    )
+    _add_attribution_args(drill)
     drill.add_argument(
         "--candidate-action",
         action="append",
@@ -176,68 +73,24 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="JSON file containing candidate actions as objects with action_id/text or an id-to-text map.",
     )
-    drill.add_argument("--trust-remote-code", action="store_true", help="Pass trust_remote_code=True to transformers.")
     landscape = subparsers.add_parser("landscape", help="Run harness-only landscape analysis over failed traces.")
-    landscape.add_argument("--traces", required=True, help="Trace JSON file or directory of trace JSON files.")
-    landscape.add_argument(
-        "--input-format",
-        choices=trace_adapter_names(),
-        default="json-fixture",
-        help="Trace adapter to use before landscape analysis.",
+    _add_trace_args(
+        landscape,
+        trace_arg="--traces",
+        trace_help="Trace JSON file or directory of trace JSON files.",
+        input_help="Trace adapter to use before landscape analysis.",
     )
-    landscape.add_argument("--model", required=True, help="Local HuggingFace causal LM path or model name.")
-    landscape.add_argument("--target-node-id", action="append", help="Agent node id to explain for every trace.")
-    landscape.add_argument(
-        "--target-marker",
-        choices=failure_target_marker_names(),
-        default=None,
-        help="Failure target marker to use when --target-node-id is omitted.",
-    )
-    landscape.add_argument("--output-dir", required=True, help="Directory to write landscape artifacts.")
-    landscape.add_argument("--output-prefix", default="tracegrad-landscape", help="Artifact filename prefix.")
+    _add_model_args(landscape)
+    _add_target_args(landscape, target_node_help="Agent node id to explain for every trace.")
+    _add_output_dir_args(landscape, default_prefix="tracegrad-landscape", noun="landscape")
     _add_objective_args(landscape)
-    landscape.add_argument(
-        "--method",
-        choices=("gradient_saliency", "gradient_times_input", "integrated_gradients"),
-        default="gradient_saliency",
-        help="Attribution method to run.",
-    )
-    landscape.add_argument("--execution-model-name", default=None, help="Optional execution model identity.")
-    landscape.add_argument("--device", default=None, help="Torch device passed to the HF adapter, for example cuda:0.")
-    landscape.add_argument(
-        "--devices",
-        default=None,
-        help="Comma-separated CUDA devices for model sharding, for example cuda:0,cuda:1.",
-    )
-    landscape.add_argument("--dtype", choices=("float16", "bfloat16", "float32"), default=None)
-    landscape.add_argument("--ig-steps", type=int, default=16, help="Integrated-gradient steps when selected.")
-    landscape.add_argument("--topk-mean-k", type=int, default=5, help="k for the topk_mean aggregation view.")
-    landscape.add_argument("--ranking-grain", choices=("node", "sub_block_kind"), default="node")
-    landscape.add_argument(
-        "--ranking-view",
-        choices=("sum", "mean", "length_norm", "topk_mean"),
-        default="sum",
-    )
+    _add_attribution_args(landscape)
     landscape.add_argument("--top-k", type=int, default=3, help="Top harness components per trace.")
-    landscape.add_argument("--trust-remote-code", action="store_true", help="Pass trust_remote_code=True to transformers.")
     evaluate = subparsers.add_parser("evaluate", help="Run an attribution evaluation suite.")
-    evaluate.add_argument("--trace", required=True, help="Path to a trace JSON file.")
-    evaluate.add_argument(
-        "--input-format",
-        choices=trace_adapter_names(),
-        default="json-fixture",
-        help="Trace adapter to use before evaluation.",
-    )
-    evaluate.add_argument("--model", required=True, help="Local HuggingFace causal LM path or model name.")
-    evaluate.add_argument("--target-node-id", action="append", help="Agent node id to explain.")
-    evaluate.add_argument(
-        "--target-marker",
-        choices=failure_target_marker_names(),
-        default=None,
-        help="Failure target marker to use when --target-node-id is omitted.",
-    )
-    evaluate.add_argument("--output-dir", required=True, help="Directory to write evaluation artifacts.")
-    evaluate.add_argument("--output-prefix", default="tracegrad-evaluation", help="Artifact filename prefix.")
+    _add_trace_args(evaluate, trace_arg="--trace", input_help="Trace adapter to use before evaluation.")
+    _add_model_args(evaluate)
+    _add_target_args(evaluate)
+    _add_output_dir_args(evaluate, default_prefix="tracegrad-evaluation", noun="evaluation")
     evaluate.add_argument(
         "--operator-config",
         action="append",
@@ -264,29 +117,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Replacement text for automatic ablation curve masks.",
     )
     _add_objective_args(evaluate)
-    evaluate.add_argument(
-        "--method",
-        choices=("gradient_saliency", "gradient_times_input", "integrated_gradients"),
-        default="gradient_saliency",
-        help="Attribution method to run.",
-    )
-    evaluate.add_argument("--execution-model-name", default=None, help="Optional execution model identity.")
-    evaluate.add_argument("--device", default=None, help="Torch device passed to the HF adapter, for example cuda:0.")
-    evaluate.add_argument(
-        "--devices",
-        default=None,
-        help="Comma-separated CUDA devices for model sharding, for example cuda:0,cuda:1.",
-    )
-    evaluate.add_argument("--dtype", choices=("float16", "bfloat16", "float32"), default=None)
-    evaluate.add_argument("--ig-steps", type=int, default=16, help="Integrated-gradient steps when selected.")
-    evaluate.add_argument("--topk-mean-k", type=int, default=5, help="k for the topk_mean aggregation view.")
-    evaluate.add_argument("--ranking-grain", choices=("node", "sub_block_kind"), default="node")
-    evaluate.add_argument(
-        "--ranking-view",
-        choices=("sum", "mean", "length_norm", "topk_mean"),
-        default="sum",
-    )
-    evaluate.add_argument("--trust-remote-code", action="store_true", help="Pass trust_remote_code=True to transformers.")
+    _add_attribution_args(evaluate)
     return parser
 
 
@@ -312,10 +143,9 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _run_analyze(args: argparse.Namespace) -> None:
-    with open(args.trace, "r", encoding="utf-8") as handle:
-        raw_trace = json.load(handle)
+    raw_trace = _load_json(args.trace)
     model = _load_model(args)
-    target_node_ids = tuple(args.target_node_id) if args.target_node_id else None
+    target_node_ids = _target_node_ids(args)
     result = analyze_trace(
         raw_trace,
         input_format=args.input_format,
@@ -337,13 +167,12 @@ def _run_analyze(args: argparse.Namespace) -> None:
 
 
 def _run_evaluate(args: argparse.Namespace) -> None:
-    with open(args.trace, "r", encoding="utf-8") as handle:
-        raw_trace = json.load(handle)
+    raw_trace = _load_json(args.trace)
     operator_configs = _load_operator_configs(args)
     if not operator_configs:
         raise ValueError("evaluate requires at least one --operator-config or --operator-config-file entry")
     model = _load_model(args)
-    target_node_ids = tuple(args.target_node_id) if args.target_node_id else None
+    target_node_ids = _target_node_ids(args)
     result = run_trace_level_evaluation(
         raw_trace,
         model=model,
@@ -370,27 +199,12 @@ def _run_evaluate(args: argparse.Namespace) -> None:
 
 
 def _run_diagnose(args: argparse.Namespace) -> None:
-    with open(args.trace, "r", encoding="utf-8") as handle:
-        raw_trace = json.load(handle)
+    raw_trace = _load_json(args.trace)
     model = _load_model(args)
-    target_node_ids = tuple(args.target_node_id) if args.target_node_id else None
     result = run_diagnosis(
         raw_trace,
-        input_format=args.input_format,
-        target_node_ids=target_node_ids,
-        target_marker=args.target_marker,
         model=model,
-        method=args.method,
-        execution_model_name=args.execution_model_name,
-        target_id=args.target_id,
-        target_span=_target_span(args),
-        expected_target_text=_optional_expected_text(args),
-        expected_target_id=args.expected_target_id,
-        topk_mean_k=args.topk_mean_k,
-        ranking_grain=args.ranking_grain,
-        ranking_view=args.ranking_view,
-        integrated_gradients_steps=args.ig_steps,
-        trace_metadata={"trace_path": args.trace},
+        **_diagnosis_kwargs(args, trace_path=args.trace),
         ablation_ks=tuple(args.ablation_k) if args.ablation_k else (),
         control_ablation=args.control_ablation,
         ablation_placeholder=args.ablation_placeholder,
@@ -402,27 +216,12 @@ def _run_diagnose(args: argparse.Namespace) -> None:
 
 
 def _run_drill(args: argparse.Namespace) -> None:
-    with open(args.trace, "r", encoding="utf-8") as handle:
-        raw_trace = json.load(handle)
+    raw_trace = _load_json(args.trace)
     model = _load_model(args)
-    target_node_ids = tuple(args.target_node_id) if args.target_node_id else None
     diagnosis = run_diagnosis(
         raw_trace,
-        input_format=args.input_format,
-        target_node_ids=target_node_ids,
-        target_marker=args.target_marker,
         model=model,
-        method=args.method,
-        execution_model_name=args.execution_model_name,
-        target_id=args.target_id,
-        target_span=_target_span(args),
-        expected_target_text=_optional_expected_text(args),
-        expected_target_id=args.expected_target_id,
-        topk_mean_k=args.topk_mean_k,
-        ranking_grain=args.ranking_grain,
-        ranking_view=args.ranking_view,
-        integrated_gradients_steps=args.ig_steps,
-        trace_metadata={"trace_path": args.trace},
+        **_diagnosis_kwargs(args, trace_path=args.trace),
     )
     drill = run_drill(diagnosis)
     output_dir = Path(args.output_dir)
@@ -434,18 +233,7 @@ def _run_drill(args: argparse.Namespace) -> None:
             raw_trace,
             model=model,
             candidates=candidates,
-            input_format=args.input_format,
-            target_node_ids=target_node_ids,
-            target_marker=args.target_marker,
-            target_id=args.target_id,
-            target_span=_target_span(args),
-            method=args.method,
-            execution_model_name=args.execution_model_name,
-            topk_mean_k=args.topk_mean_k,
-            ranking_grain=args.ranking_grain,
-            ranking_view=args.ranking_view,
-            integrated_gradients_steps=args.ig_steps,
-            trace_metadata={"trace_path": args.trace},
+            **_matrix_kwargs(args, trace_path=args.trace),
         )
         write_influence_matrix_json(matrix, output_dir / f"{args.output_prefix}-matrix.json")
         write_influence_matrix_markdown(matrix, output_dir / f"{args.output_prefix}-matrix.md")
@@ -454,28 +242,86 @@ def _run_drill(args: argparse.Namespace) -> None:
 def _run_landscape(args: argparse.Namespace) -> None:
     trace_inputs = load_trace_inputs(args.traces)
     model = _load_model(args)
-    target_node_ids = tuple(args.target_node_id) if args.target_node_id else None
     result = run_landscape(
         trace_inputs,
         model=model,
-        expected_target_text=_optional_expected_text(args),
-        input_format=args.input_format,
-        target_node_ids=target_node_ids,
-        target_marker=args.target_marker,
-        target_id=args.target_id,
-        target_span=_target_span(args),
-        method=args.method,
-        execution_model_name=args.execution_model_name,
-        topk_mean_k=args.topk_mean_k,
-        ranking_grain=args.ranking_grain,
-        ranking_view=args.ranking_view,
-        integrated_gradients_steps=args.ig_steps,
+        **_landscape_kwargs(args),
         top_k=args.top_k,
     )
     output_dir = Path(args.output_dir)
     write_landscape_json(result, output_dir / f"{args.output_prefix}.json")
     write_landscape_markdown(result, output_dir / f"{args.output_prefix}.md")
     write_landscape_html(result, output_dir / f"{args.output_prefix}.html")
+
+
+def _add_trace_args(
+    parser: argparse.ArgumentParser,
+    *,
+    trace_arg: str,
+    trace_help: str = "Path to a trace JSON file.",
+    input_help: str,
+) -> None:
+    parser.add_argument(trace_arg, required=True, help=trace_help)
+    parser.add_argument(
+        "--input-format",
+        choices=trace_adapter_names(),
+        default="json-fixture",
+        help=input_help,
+    )
+
+
+def _add_model_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--model", required=True, help="Local HuggingFace causal LM path or model name.")
+    parser.add_argument("--device", default=None, help="Torch device passed to the HF adapter, for example cuda:0.")
+    parser.add_argument(
+        "--devices",
+        default=None,
+        help="Comma-separated CUDA devices for model sharding, for example cuda:0,cuda:1.",
+    )
+    parser.add_argument("--dtype", choices=("float16", "bfloat16", "float32"), default=None)
+    parser.add_argument("--trust-remote-code", action="store_true", help="Pass trust_remote_code=True to transformers.")
+
+
+def _add_target_args(
+    parser: argparse.ArgumentParser,
+    *,
+    target_node_help: str = "Agent node id to explain.",
+) -> None:
+    parser.add_argument("--target-node-id", action="append", help=target_node_help)
+    parser.add_argument(
+        "--target-marker",
+        choices=failure_target_marker_names(),
+        default=None,
+        help="Failure target marker to use when --target-node-id is omitted.",
+    )
+
+
+def _add_output_dir_args(
+    parser: argparse.ArgumentParser,
+    *,
+    default_prefix: str,
+    noun: str,
+) -> None:
+    parser.add_argument("--output-dir", required=True, help=f"Directory to write {noun} artifacts.")
+    parser.add_argument("--output-prefix", default=default_prefix, help="Artifact filename prefix.")
+
+
+def _add_attribution_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--method",
+        choices=("gradient_saliency", "gradient_times_input", "integrated_gradients"),
+        default="gradient_saliency",
+        help="Attribution method to run.",
+    )
+    parser.add_argument("--execution-model-name", default=None, help="Optional execution model identity.")
+    parser.add_argument("--ig-steps", type=int, default=16, help="Integrated-gradient steps when selected.")
+    parser.add_argument("--topk-mean-k", type=int, default=5, help="k for the topk_mean aggregation view.")
+    parser.add_argument("--ranking-grain", choices=("node", "sub_block_kind"), default="node")
+    parser.add_argument(
+        "--ranking-view",
+        choices=("sum", "mean", "length_norm", "topk_mean"),
+        default="sum",
+    )
 
 
 def _add_objective_args(parser: argparse.ArgumentParser) -> None:
@@ -502,6 +348,48 @@ def _add_objective_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--expected-target-file", default=None, help="Path to expected target text.")
     parser.add_argument("--target-span-start", type=int, default=None, help="Optional target token span start.")
     parser.add_argument("--target-span-end", type=int, default=None, help="Optional target token span end.")
+
+
+def _load_json(path: str | Path) -> Any:
+    with open(path, "r", encoding="utf-8") as handle:
+        return json.load(handle)
+
+
+def _target_node_ids(args: argparse.Namespace) -> tuple[str, ...] | None:
+    return tuple(args.target_node_id) if args.target_node_id else None
+
+
+def _diagnosis_kwargs(args: argparse.Namespace, *, trace_path: str | Path) -> dict[str, Any]:
+    return {
+        "input_format": args.input_format,
+        "target_node_ids": _target_node_ids(args),
+        "target_marker": args.target_marker,
+        "target_id": args.target_id,
+        "target_span": _target_span(args),
+        "expected_target_text": _optional_expected_text(args),
+        "expected_target_id": args.expected_target_id,
+        "method": args.method,
+        "execution_model_name": args.execution_model_name,
+        "topk_mean_k": args.topk_mean_k,
+        "ranking_grain": args.ranking_grain,
+        "ranking_view": args.ranking_view,
+        "integrated_gradients_steps": args.ig_steps,
+        "trace_metadata": {"trace_path": str(trace_path)},
+    }
+
+
+def _matrix_kwargs(args: argparse.Namespace, *, trace_path: str | Path) -> dict[str, Any]:
+    kwargs = _diagnosis_kwargs(args, trace_path=trace_path)
+    kwargs.pop("expected_target_text")
+    kwargs.pop("expected_target_id")
+    return kwargs
+
+
+def _landscape_kwargs(args: argparse.Namespace) -> dict[str, Any]:
+    kwargs = _diagnosis_kwargs(args, trace_path=args.traces)
+    kwargs.pop("trace_metadata")
+    kwargs.pop("expected_target_id")
+    return kwargs
 
 
 def _build_objective(args: argparse.Namespace, *, target_node_ids: tuple[str, ...] | None) -> TargetObjective | None:
