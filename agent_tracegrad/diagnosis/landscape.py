@@ -9,7 +9,8 @@ from statistics import mean, pstdev
 from types import MappingProxyType
 from typing import Any, Mapping, Sequence
 
-from agent_tracegrad.diagnosis.runner import run_diagnosis
+from agent_tracegrad.diagnosis.runner import read_diagnosis_json, run_diagnosis
+from agent_tracegrad.diagnosis.types import DiagnosisResult
 from agent_tracegrad.model.adapter import ModelAdapter
 
 HARNESS_KINDS = frozenset({"system.instruction", "system.tool_schema", "system.skills"})
@@ -88,25 +89,44 @@ def run_landscape(
 ) -> LandscapeResult:
     if not trace_inputs:
         raise ValueError("landscape requires at least one trace")
-    trace_results: list[LandscapeTraceResult] = []
+    diagnoses: list[tuple[str, DiagnosisResult, str | None]] = []
     for trace_id, raw_trace, trace_path in trace_inputs:
-        diagnosis = run_diagnosis(
-            raw_trace,
-            model=model,
-            expected_target_text=expected_target_text,
-            input_format=input_format,
-            target_node_ids=target_node_ids,
-            target_marker=target_marker,
-            target_id=target_id,
-            target_span=target_span,
-            method=method,
-            execution_model_name=execution_model_name,
-            topk_mean_k=topk_mean_k,
-            ranking_grain=ranking_grain,
-            ranking_view=ranking_view,
-            integrated_gradients_steps=integrated_gradients_steps,
-            trace_metadata={"trace_id": trace_id, "trace_path": trace_path},
+        diagnoses.append(
+            (
+                trace_id,
+                run_diagnosis(
+                    raw_trace,
+                    model=model,
+                    expected_target_text=expected_target_text,
+                    input_format=input_format,
+                    target_node_ids=target_node_ids,
+                    target_marker=target_marker,
+                    target_id=target_id,
+                    target_span=target_span,
+                    method=method,
+                    execution_model_name=execution_model_name,
+                    topk_mean_k=topk_mean_k,
+                    ranking_grain=ranking_grain,
+                    ranking_view=ranking_view,
+                    integrated_gradients_steps=integrated_gradients_steps,
+                    trace_metadata={"trace_id": trace_id, "trace_path": trace_path},
+                ),
+                trace_path,
+            )
         )
+    return run_landscape_from_diagnoses(diagnoses, ranking_view=ranking_view, top_k=top_k)
+
+
+def run_landscape_from_diagnoses(
+    diagnoses: Sequence[tuple[str, DiagnosisResult, str | None]],
+    *,
+    ranking_view: str = "sum",
+    top_k: int = 3,
+) -> LandscapeResult:
+    if not diagnoses:
+        raise ValueError("landscape requires at least one diagnosis")
+    trace_results: list[LandscapeTraceResult] = []
+    for trace_id, diagnosis, trace_path in diagnoses:
         distribution = _select_harness_distribution(diagnosis, ranking_view=ranking_view)
         fingerprint = {
             contribution.instance_id: contribution.margin
@@ -225,6 +245,14 @@ def load_trace_inputs(path: str | Path) -> tuple[tuple[str, Any, str | None], ..
         return ((_trace_id(root), json.loads(root.read_text(encoding="utf-8")), str(root)),)
     files = sorted(item for item in root.iterdir() if item.is_file() and item.suffix == ".json")
     return tuple((_trace_id(item), json.loads(item.read_text(encoding="utf-8")), str(item)) for item in files)
+
+
+def load_diagnosis_inputs(path: str | Path) -> tuple[tuple[str, DiagnosisResult, str | None], ...]:
+    root = Path(path)
+    if root.is_file():
+        return ((_trace_id(root), read_diagnosis_json(root), str(root)),)
+    files = sorted(item for item in root.iterdir() if item.is_file() and item.suffix == ".json")
+    return tuple((_trace_id(item), read_diagnosis_json(item), str(item)) for item in files)
 
 
 def _select_harness_distribution(diagnosis, *, ranking_view: str):

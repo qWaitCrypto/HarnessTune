@@ -25,7 +25,9 @@ from agent_tracegrad.diagnosis import (
     write_landscape_json,
     write_landscape_markdown,
     write_landscape_html,
+    load_diagnosis_inputs,
     load_trace_inputs,
+    run_landscape_from_diagnoses,
 )
 from agent_tracegrad.evaluation import run_trace_level_evaluation, write_evaluation_artifacts
 from agent_tracegrad.model import HuggingFaceCausalLMAdapter
@@ -76,13 +78,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="JSON file containing candidate actions as objects with action_id/text or an id-to-text map.",
     )
     landscape = subparsers.add_parser("landscape", help="Run harness-only landscape analysis over failed traces.")
-    _add_trace_args(
-        landscape,
-        trace_arg="--traces",
-        trace_help="Trace JSON file or directory of trace JSON files.",
-        input_help="Trace adapter to use before landscape analysis.",
+    landscape.add_argument("--traces", default=None, help="Trace JSON file or directory of trace JSON files.")
+    landscape.add_argument("--diagnose-results", default=None, help="Diagnose JSON file or directory of diagnose JSON artifacts.")
+    landscape.add_argument(
+        "--input-format",
+        choices=trace_adapter_names(),
+        default="json-fixture",
+        help="Trace adapter to use before landscape analysis.",
     )
-    _add_model_args(landscape)
+    _add_model_args(landscape, required=False)
     _add_target_args(landscape, target_node_help="Agent node id to explain for every trace.")
     _add_output_dir_args(landscape, default_prefix="tracegrad-landscape", noun="landscape")
     _add_objective_args(landscape)
@@ -244,14 +248,24 @@ def _run_drill(args: argparse.Namespace) -> None:
 
 
 def _run_landscape(args: argparse.Namespace) -> None:
-    trace_inputs = load_trace_inputs(args.traces)
-    model = _load_model(args)
-    result = run_landscape(
-        trace_inputs,
-        model=model,
-        **_landscape_kwargs(args),
-        top_k=args.top_k,
-    )
+    if bool(args.traces) == bool(args.diagnose_results):
+        raise ValueError("landscape requires exactly one of --traces or --diagnose-results")
+    if args.diagnose_results:
+        result = run_landscape_from_diagnoses(
+            load_diagnosis_inputs(args.diagnose_results),
+            ranking_view=args.ranking_view,
+            top_k=args.top_k,
+        )
+    else:
+        if not args.model:
+            raise ValueError("landscape requires --model when using --traces")
+        model = _load_model(args)
+        result = run_landscape(
+            load_trace_inputs(args.traces),
+            model=model,
+            **_landscape_kwargs(args),
+            top_k=args.top_k,
+        )
     output_dir = Path(args.output_dir)
     write_landscape_json(result, output_dir / f"{args.output_prefix}.json")
     write_landscape_markdown(result, output_dir / f"{args.output_prefix}.md")
@@ -274,8 +288,8 @@ def _add_trace_args(
     )
 
 
-def _add_model_args(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--model", required=True, help="Local HuggingFace causal LM path or model name.")
+def _add_model_args(parser: argparse.ArgumentParser, *, required: bool = True) -> None:
+    parser.add_argument("--model", required=required, help="Local HuggingFace causal LM path or model name.")
     parser.add_argument("--device", default=None, help="Torch device passed to the HF adapter, for example cuda:0.")
     parser.add_argument(
         "--devices",

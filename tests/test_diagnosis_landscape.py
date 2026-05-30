@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from agent_tracegrad.diagnosis import run_landscape
+from agent_tracegrad.diagnosis import run_diagnosis, run_landscape, run_landscape_from_diagnoses
 from agent_tracegrad.model.adapter import ModelForwardOutput, TokenizedOutput
 
 import pytest
@@ -101,3 +101,18 @@ def test_run_landscape_builds_harness_stats_and_clusters() -> None:
     assert result.component_stats
     assert result.clusters
     assert all("user" not in component for trace in result.traces for component in trace.fingerprint)
+
+
+def test_run_landscape_from_diagnoses_reuses_existing_results() -> None:
+    diagnosis = run_diagnosis(
+        _trace("transfer policy", "wrong transfer"),
+        model=TinyBackwardModel(),
+        target_node_ids=("agent",),
+        expected_target_text="I cannot do that.",
+    )
+
+    result = run_landscape_from_diagnoses((("trace-a", diagnosis, "diagnosis.json"),))
+
+    assert len(result.traces) == 1
+    assert result.component_stats
+    assert result.traces[0].trace_path == "diagnosis.json"
