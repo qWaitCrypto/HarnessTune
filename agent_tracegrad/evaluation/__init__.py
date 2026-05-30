@@ -18,6 +18,7 @@ from agent_tracegrad.evaluation.evidence import (
     build_evidence_report,
     evidence_report_to_dict,
 )
+from agent_tracegrad.evaluation.counterfactual import DeltaLLPoint, delta_ll_curve, objective_loss
 from agent_tracegrad.evaluation.metrics import (
     MetricResult,
     delta_ll_at_k,
@@ -41,6 +42,7 @@ from agent_tracegrad.evaluation.spec import PerturbationSpec
 
 __all__ = [
     "AblationCurvePoint",
+    "DeltaLLPoint",
     "EvaluationRunResult",
     "EvaluationSampleResult",
     "EvidenceReport",
@@ -57,6 +59,7 @@ __all__ = [
     "apply_trace_level_perturbation",
     "build_evidence_report",
     "delta_ll_at_k",
+    "delta_ll_curve",
     "evaluation_run_to_dict",
     "evaluation_run_to_jsonl_records",
     "evaluation_run_to_markdown",
@@ -66,6 +69,7 @@ __all__ = [
     "generate_trace_level_samples",
     "metric_to_dict",
     "method_consistency",
+    "objective_loss",
     "metrics_for_distribution",
     "rank_correlation",
     "recall_at_k",

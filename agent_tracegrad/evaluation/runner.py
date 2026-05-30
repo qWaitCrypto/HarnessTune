@@ -14,10 +14,10 @@ from agent_tracegrad.analysis import (
 )
 from agent_tracegrad.evaluation.metrics import (
     MetricResult,
-    delta_ll_at_k,
     metrics_for_distribution,
     summarize_metric_results,
 )
+from agent_tracegrad.evaluation.counterfactual import delta_ll_curve
 from agent_tracegrad.evaluation.orchestration import TraceEvaluationContext, generate_evaluation_context
 from agent_tracegrad.evaluation.perturbation.trace_level import apply_trace_level_perturbation
 from agent_tracegrad.evaluation.sample_generation import TraceLevelSample
@@ -126,12 +126,6 @@ def run_trace_level_evaluation(
             "evaluation_sample_label_id": "baseline",
         },
     )
-    baseline_distribution = _select_distribution(
-        baseline_analysis.rankings,
-        baseline_analysis.distributions,
-        ranking_grain,
-        ranking_view,
-    )
     baseline_ranking = _select_ranking(baseline_analysis.rankings, ranking_grain, ranking_view)
     baseline_loss = _analysis_loss(baseline_analysis)
     ablation_curve = _run_ablation_curve(
@@ -174,18 +168,19 @@ def run_trace_level_evaluation(
         )
         distribution = _select_distribution(analysis.rankings, analysis.distributions, ranking_grain, ranking_view)
         metrics = list(metrics_for_distribution(distribution, sample.perturbation.label, ks=metric_ks))
-        perturbed_loss = _analysis_loss(analysis)
-        if baseline_loss is not None and perturbed_loss is not None:
+        if analysis.objective is not None:
             metrics.extend(
-                delta_ll_at_k(
-                    baseline_loss,
-                    perturbed_loss,
-                    baseline_ranking,
-                    k=k,
+                _delta_ll_metric(
+                    point,
                     label_id=sample.perturbation.label.label_id,
-                    objective_id=context.objective.objective_id,
                 )
-                for k in metric_ks
+                for point in delta_ll_curve(
+                    analysis.trace,
+                    analysis.attribution,
+                    analysis.objective,
+                    model,
+                    ks=metric_ks,
+                )
             )
         sample_results.append(EvaluationSampleResult(sample=sample, analysis=analysis, metrics=metrics))
 
@@ -326,6 +321,24 @@ def _analysis_loss(analysis: SingleTraceAnalysisResult) -> float | None:
     if loss is None:
         return None
     return float(loss)
+
+
+def _delta_ll_metric(point, *, label_id: str) -> MetricResult:
+    return MetricResult(
+        metric_name="delta_ll@k",
+        value=point.delta_loss,
+        metadata={
+            "k": point.k,
+            "baseline_loss": point.baseline_loss,
+            "masked_loss": point.masked_loss,
+            "label_id": label_id,
+            "objective_id": point.metadata["objective_id"],
+            "objective_type": point.metadata["objective_type"],
+            "selected_count": len(point.selected_token_indexes),
+            "selected_token_indexes": ",".join(str(index) for index in point.selected_token_indexes),
+            "counterfactual": "input_embedding_zero_mask",
+        },
+    )
 
 
 def _top_ranked_node_ids(ranking: Sequence[RankedAttribution], *, k: int) -> tuple[str, ...]:
