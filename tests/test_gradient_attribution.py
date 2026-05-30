@@ -145,6 +145,36 @@ def test_gradient_saliency_supports_contrastive_objective() -> None:
     assert result.token_scores[3:] == (0.0, 0.0)
 
 
+def test_contrastive_objective_can_produce_signed_scores() -> None:
+    class SignedContrastiveModel(ContextualFakeGradientModel):
+        def tokenize(self, text: str) -> TokenizedOutput:
+            vocab = {"zero": 0, "one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6}
+            ids = [vocab.get(token, 15) for token in text.split()]
+            return TokenizedOutput(
+                input_ids=torch.tensor(ids, dtype=torch.long).unsqueeze(0),
+                attention_mask=torch.ones((1, len(ids)), dtype=torch.long),
+            )
+
+        def forward(self, inputs_embeds, attention_mask):
+            del attention_mask
+            logits = torch.zeros_like(inputs_embeds)
+            if inputs_embeds.shape[1] > 3:
+                prefix_signal = inputs_embeds[:, 0, 0]
+                logits[:, 2, 3] = -4.0 * prefix_signal
+                logits[:, 2, 5] = 4.0 * prefix_signal
+            return ModelForwardOutput(logits=logits)
+
+    trace = make_trace()
+    bad = FailureTarget("bad-transfer", ("agent-1",))
+    expected = ExpectedTarget(target_id="gold-refusal", content="five six")
+    objective = TargetObjective.contrastive(bad, expected)
+
+    result = GradientSaliencyAttribution().attribute_objective(trace, objective, SignedContrastiveModel())
+
+    assert any(score < 0.0 for score in result.token_scores)
+    assert result.token_scores[3:] == (0.0, 0.0)
+
+
 def test_gradient_times_input_and_integrated_gradients_validate_against_trace() -> None:
     trace = make_trace()
     target = FailureTarget("target-1", ("agent-1",))

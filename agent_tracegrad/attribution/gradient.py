@@ -148,7 +148,7 @@ def _attribute_with_gradients(
     if gradients is None:
         raise RuntimeError("input embedding gradients were not populated")
     scores = gradients if mode == "gradient" else gradients * inputs_embeds.detach()
-    token_scores = torch.linalg.vector_norm(scores, dim=-1).squeeze(0)
+    token_scores = _token_scores_from_vectors(scores).squeeze(0)
     token_scores = _zero_agent_scores(token_scores, trace)
     result = AttributionResult(
         method_name=method_name,
@@ -195,7 +195,7 @@ def _attribute_objective_with_gradients(
     if gradients is None:
         raise RuntimeError("input embedding gradients were not populated")
     scores = gradients if mode == "gradient" else gradients * inputs_embeds.detach()
-    token_scores = torch.linalg.vector_norm(scores, dim=-1).squeeze(0)
+    token_scores = _token_scores_from_vectors(scores, signed=objective.objective_type == "contrastive").squeeze(0)
     token_scores = token_scores[: objective_input.trace_token_count]
     token_scores = _zero_agent_scores(token_scores, trace)
     result = AttributionResult(
@@ -236,7 +236,7 @@ def _attribute_integrated_gradients(
         accumulated_gradients = accumulated_gradients + gradients
     average_gradients = accumulated_gradients / steps
     attributions = (actual_embeds - baseline) * average_gradients
-    token_scores = torch.linalg.vector_norm(attributions, dim=-1).squeeze(0)
+    token_scores = _token_scores_from_vectors(attributions).squeeze(0)
     token_scores = _zero_agent_scores(token_scores, trace)
     result = AttributionResult(
         method_name="integrated_gradients",
@@ -289,7 +289,7 @@ def _attribute_objective_integrated_gradients(
         accumulated_gradients = accumulated_gradients + gradients
     average_gradients = accumulated_gradients / steps
     attributions = (actual_embeds - baseline) * average_gradients
-    token_scores = torch.linalg.vector_norm(attributions, dim=-1).squeeze(0)
+    token_scores = _token_scores_from_vectors(attributions, signed=objective.objective_type == "contrastive").squeeze(0)
     token_scores = token_scores[: objective_input.trace_token_count]
     token_scores = _zero_agent_scores(token_scores, trace)
     result = AttributionResult(
@@ -487,6 +487,7 @@ def _attribute_anchored_objective_with_gradients(
             objective_input,
             loss,
             combined,
+            signed=objective.objective_type == "contrastive",
         )
     if objective.objective_type != "expected_action":
         raise ValueError("anchored objective only supports expected_action or contrastive")
@@ -541,11 +542,12 @@ def _anchored_objective_result(
     objective_input: _AnchoredObjectiveInput,
     loss,
     prefix_vectors,
+    signed: bool = False,
 ) -> AttributionResult:
     import torch
 
     combined = prefix_vectors
-    prefix_scores = torch.linalg.vector_norm(combined, dim=-1).squeeze(0)
+    prefix_scores = _token_scores_from_vectors(combined, signed=signed).squeeze(0)
     token_scores = _pad_prefix_scores(prefix_scores, objective_input.trace_token_count)
     token_scores = _zero_agent_scores(token_scores, trace)
     result = AttributionResult(
@@ -623,7 +625,7 @@ def _attribute_anchored_objective_integrated_gradients(
         bad_attributions = (bad_actual - bad_baseline) * (bad_accumulated / steps)
         prefix_vectors.insert(0, bad_attributions[:, : objective_input.prefix_token_count, :])
     combined = sum(prefix_vectors)
-    prefix_scores = torch.linalg.vector_norm(combined, dim=-1).squeeze(0)
+    prefix_scores = _token_scores_from_vectors(combined, signed=objective.objective_type == "contrastive").squeeze(0)
     token_scores = _pad_prefix_scores(prefix_scores, objective_input.trace_token_count)
     token_scores = _zero_agent_scores(token_scores, trace)
     if final_loss is None:
@@ -776,6 +778,16 @@ def _pad_prefix_scores(prefix_scores, trace_token_count: int):
     copy_count = min(prefix_scores.shape[0], trace_token_count)
     token_scores[:copy_count] = prefix_scores[:copy_count]
     return token_scores
+
+
+def _token_scores_from_vectors(vectors, *, signed: bool = False):
+    import torch
+
+    magnitudes = torch.linalg.vector_norm(vectors, dim=-1)
+    if not signed:
+        return magnitudes
+    signs = torch.sign(vectors.sum(dim=-1))
+    return magnitudes * signs
 
 
 def _zero_agent_scores(token_scores, trace: SerializedTrace):

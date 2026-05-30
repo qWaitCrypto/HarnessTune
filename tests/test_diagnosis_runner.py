@@ -50,6 +50,25 @@ class TinyBackwardModel:
         return False
 
 
+class SignedContrastiveModel(TinyBackwardModel):
+    def tokenize(self, text: str) -> TokenizedOutput:
+        vocab = {"zero": 0, "one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6}
+        ids = [vocab.get(token, 15) for token in text.split()]
+        return TokenizedOutput(
+            input_ids=torch.tensor(ids, dtype=torch.long).unsqueeze(0),
+            attention_mask=torch.ones((1, len(ids)), dtype=torch.long),
+        )
+
+    def forward(self, inputs_embeds, attention_mask):
+        del attention_mask
+        logits = torch.zeros_like(inputs_embeds)
+        if inputs_embeds.shape[1] > 3:
+            prefix_signal = inputs_embeds[:, 0, 0]
+            logits[:, 2, 3] = -4.0 * prefix_signal
+            logits[:, 2, 5] = 4.0 * prefix_signal
+        return ModelForwardOutput(logits=logits)
+
+
 class WhitespaceOffsetTokenizer:
     name_or_path = "whitespace-offset-tokenizer"
 
@@ -189,6 +208,23 @@ class TestFullDiagnosis:
         }
         for contribution in node_sum.contributions:
             assert contribution.margin == contrastive_by_id[contribution.instance_id]
+
+    def test_contrastive_margin_can_be_negative_and_preserved(self) -> None:
+        result = run_diagnosis(
+            _make_raw_trace(),
+            model=SignedContrastiveModel(),
+            target_node_ids=("agent-1",),
+            expected_target_text="five six",
+        )
+
+        node_sum = next(
+            md for md in result.margin_distributions
+            if md.grain == "node" and md.view_name == "sum"
+        )
+
+        assert any(score < 0.0 for score in result.contrastive_result.attribution.token_scores)
+        assert any(contribution.margin < 0.0 for contribution in node_sum.contributions)
+        assert any(contribution.classification == "preserve" for contribution in node_sum.contributions)
 
 
 class TestComponentClassification:
