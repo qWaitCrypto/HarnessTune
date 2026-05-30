@@ -9,12 +9,16 @@ from typing import Any
 
 from agent_tracegrad.analysis import analyze_trace, write_analysis_json
 from agent_tracegrad.diagnosis import (
+    CandidateAction,
     run_diagnosis,
     run_drill,
+    run_influence_matrix,
     write_diagnosis_json,
     write_diagnosis_markdown,
     write_drill_json,
     write_drill_markdown,
+    write_influence_matrix_json,
+    write_influence_matrix_markdown,
 )
 from agent_tracegrad.evaluation import run_trace_level_evaluation, write_evaluation_artifacts
 from agent_tracegrad.model import HuggingFaceCausalLMAdapter
@@ -154,6 +158,17 @@ def build_parser() -> argparse.ArgumentParser:
         "--ranking-view",
         choices=("sum", "mean", "length_norm", "topk_mean"),
         default="sum",
+    )
+    drill.add_argument(
+        "--candidate-action",
+        action="append",
+        default=[],
+        help="Candidate action as id=text. May be repeated to emit an influence matrix.",
+    )
+    drill.add_argument(
+        "--candidate-action-file",
+        default=None,
+        help="JSON file containing candidate actions as objects with action_id/text or an id-to-text map.",
     )
     drill.add_argument("--trust-remote-code", action="store_true", help="Pass trust_remote_code=True to transformers.")
     evaluate = subparsers.add_parser("evaluate", help="Run an attribution evaluation suite.")
@@ -360,6 +375,27 @@ def _run_drill(args: argparse.Namespace) -> None:
     output_dir = Path(args.output_dir)
     write_drill_json(drill, output_dir / f"{args.output_prefix}.json")
     write_drill_markdown(drill, output_dir / f"{args.output_prefix}.md")
+    candidates = _load_candidate_actions(args)
+    if candidates:
+        matrix = run_influence_matrix(
+            raw_trace,
+            model=model,
+            candidates=candidates,
+            input_format=args.input_format,
+            target_node_ids=target_node_ids,
+            target_marker=args.target_marker,
+            target_id=args.target_id,
+            target_span=_target_span(args),
+            method=args.method,
+            execution_model_name=args.execution_model_name,
+            topk_mean_k=args.topk_mean_k,
+            ranking_grain=args.ranking_grain,
+            ranking_view=args.ranking_view,
+            integrated_gradients_steps=args.ig_steps,
+            trace_metadata={"trace_path": args.trace},
+        )
+        write_influence_matrix_json(matrix, output_dir / f"{args.output_prefix}-matrix.json")
+        write_influence_matrix_markdown(matrix, output_dir / f"{args.output_prefix}-matrix.md")
 
 
 def _add_objective_args(parser: argparse.ArgumentParser) -> None:
@@ -463,6 +499,38 @@ def _load_operator_configs(args: argparse.Namespace) -> tuple[dict[str, Any], ..
             configs.append(_coerce_operator_config(loaded))
     configs.extend(_coerce_operator_config(json.loads(raw)) for raw in args.operator_config)
     return tuple(configs)
+
+
+def _load_candidate_actions(args: argparse.Namespace) -> tuple[CandidateAction, ...]:
+    candidates: list[CandidateAction] = []
+    if args.candidate_action_file:
+        loaded = json.loads(Path(args.candidate_action_file).read_text(encoding="utf-8"))
+        candidates.extend(_coerce_candidate_actions(loaded))
+    for raw in args.candidate_action:
+        if "=" not in raw:
+            raise ValueError("--candidate-action must use id=text format")
+        action_id, text = raw.split("=", 1)
+        candidates.append(CandidateAction(action_id=action_id.strip(), text=text.strip()))
+    return tuple(candidates)
+
+
+def _coerce_candidate_actions(value: Any) -> tuple[CandidateAction, ...]:
+    if isinstance(value, dict):
+        if "action_id" in value and "text" in value:
+            return (
+                CandidateAction(
+                    action_id=str(value["action_id"]),
+                    text=str(value["text"]),
+                    metadata=value.get("metadata") or {},
+                ),
+            )
+        return tuple(CandidateAction(action_id=str(key), text=str(text)) for key, text in value.items())
+    if isinstance(value, list):
+        candidates: list[CandidateAction] = []
+        for item in value:
+            candidates.extend(_coerce_candidate_actions(item))
+        return tuple(candidates)
+    raise ValueError("candidate action file must contain an object, map, or list")
 
 
 def _coerce_operator_config(value: Any) -> dict[str, Any]:

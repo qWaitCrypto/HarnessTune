@@ -359,3 +359,66 @@ def test_cli_drill_writes_artifacts(tmp_path, monkeypatch) -> None:
     assert (output_dir / "drill.md").exists()
     payload = json.loads((output_dir / "drill.json").read_text(encoding="utf-8"))
     assert payload["atoms"]
+
+
+def test_cli_drill_writes_influence_matrix_when_candidates_are_provided(tmp_path, monkeypatch) -> None:
+    pytest.importorskip("torch")
+    trace_path = tmp_path / "trace.json"
+    output_dir = tmp_path / "drill"
+    trace_path.write_text(
+        json.dumps(
+            {
+                "nodes": [
+                    {
+                        "node_id": "sys-1",
+                        "block_role": "system",
+                        "sub_block_kind": "system.instruction",
+                        "content": "# Policy\n- First call transfer_to_human_agents.\n- Refuse after deadline.",
+                        "sequence_index": 0,
+                    },
+                    {
+                        "node_id": "agent-1",
+                        "block_role": "agent",
+                        "sub_block_kind": "agent.content",
+                        "content": "wrong answer",
+                        "sequence_index": 1,
+                    },
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(
+        "agent_tracegrad.cli.HuggingFaceCausalLMAdapter.from_pretrained",
+        lambda *args, **kwargs: FakeCliModel(),
+    )
+
+    exit_code = main(
+        [
+            "drill",
+            "--trace",
+            str(trace_path),
+            "--model",
+            "fake-model",
+            "--target-node-id",
+            "agent-1",
+            "--expected-target-text",
+            "right answer",
+            "--output-dir",
+            str(output_dir),
+            "--output-prefix",
+            "drill",
+            "--candidate-action",
+            "refuse=right answer",
+            "--candidate-action",
+            "transfer=wrong answer",
+        ]
+    )
+
+    assert exit_code == 0
+    assert (output_dir / "drill-matrix.json").exists()
+    assert (output_dir / "drill-matrix.md").exists()
+    payload = json.loads((output_dir / "drill-matrix.json").read_text(encoding="utf-8"))
+    assert [candidate["action_id"] for candidate in payload["candidates"]] == ["refuse", "transfer"]
+    assert payload["rows"]

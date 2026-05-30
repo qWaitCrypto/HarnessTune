@@ -10,6 +10,17 @@ from agent_tracegrad.diagnosis.drill import (
     write_drill_json,
     write_drill_markdown,
 )
+from agent_tracegrad.diagnosis.influence import (
+    CandidateAction,
+    InfluenceCell,
+    InfluenceMatrixResult,
+    InfluenceRow,
+    influence_matrix_to_dict,
+    influence_matrix_to_markdown,
+    run_influence_matrix,
+    write_influence_matrix_json,
+    write_influence_matrix_markdown,
+)
 from agent_tracegrad.diagnosis.patterns import detect_diagnostic_labels, diagnostic_label_to_dict
 from agent_tracegrad.diagnosis.report import diagnosis_to_markdown, write_diagnosis_markdown
 from agent_tracegrad.diagnosis.runner import (
@@ -30,6 +41,7 @@ from agent_tracegrad.diagnosis.types import (
 
 __all__ = [
     "AtomAttribution",
+    "CandidateAction",
     "ComponentAtom",
     "ComponentClassification",
     "DiagnosisAblation",
@@ -38,6 +50,9 @@ __all__ = [
     "DiagnosticLabel",
     "DiagnosticLabelName",
     "DrillResult",
+    "InfluenceCell",
+    "InfluenceMatrixResult",
+    "InfluenceRow",
     "MarginContribution",
     "MarginDistribution",
     "atomize_node",
@@ -49,10 +64,15 @@ __all__ = [
     "diagnosis_to_dict",
     "drill_result_to_dict",
     "drill_result_to_markdown",
+    "influence_matrix_to_dict",
+    "influence_matrix_to_markdown",
     "run_diagnosis",
     "run_drill",
+    "run_influence_matrix",
     "write_diagnosis_markdown",
     "write_diagnosis_json",
     "write_drill_json",
     "write_drill_markdown",
+    "write_influence_matrix_json",
+    "write_influence_matrix_markdown",
 ]
