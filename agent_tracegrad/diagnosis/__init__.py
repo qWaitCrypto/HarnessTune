@@ -21,6 +21,18 @@ from agent_tracegrad.diagnosis.influence import (
     write_influence_matrix_json,
     write_influence_matrix_markdown,
 )
+from agent_tracegrad.diagnosis.landscape import (
+    LandscapeCluster,
+    LandscapeComponentStats,
+    LandscapeResult,
+    LandscapeTraceResult,
+    landscape_to_dict,
+    landscape_to_markdown,
+    load_trace_inputs,
+    run_landscape,
+    write_landscape_json,
+    write_landscape_markdown,
+)
 from agent_tracegrad.diagnosis.patterns import detect_diagnostic_labels, diagnostic_label_to_dict
 from agent_tracegrad.diagnosis.report import diagnosis_to_markdown, write_diagnosis_markdown
 from agent_tracegrad.diagnosis.runner import (
@@ -53,6 +65,10 @@ __all__ = [
     "InfluenceCell",
     "InfluenceMatrixResult",
     "InfluenceRow",
+    "LandscapeCluster",
+    "LandscapeComponentStats",
+    "LandscapeResult",
+    "LandscapeTraceResult",
     "MarginContribution",
     "MarginDistribution",
     "atomize_node",
@@ -66,13 +82,19 @@ __all__ = [
     "drill_result_to_markdown",
     "influence_matrix_to_dict",
     "influence_matrix_to_markdown",
+    "landscape_to_dict",
+    "landscape_to_markdown",
+    "load_trace_inputs",
     "run_diagnosis",
     "run_drill",
     "run_influence_matrix",
+    "run_landscape",
     "write_diagnosis_markdown",
     "write_diagnosis_json",
     "write_drill_json",
     "write_drill_markdown",
     "write_influence_matrix_json",
     "write_influence_matrix_markdown",
+    "write_landscape_json",
+    "write_landscape_markdown",
 ]

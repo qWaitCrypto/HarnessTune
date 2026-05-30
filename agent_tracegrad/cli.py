@@ -13,12 +13,16 @@ from agent_tracegrad.diagnosis import (
     run_diagnosis,
     run_drill,
     run_influence_matrix,
+    run_landscape,
     write_diagnosis_json,
     write_diagnosis_markdown,
     write_drill_json,
     write_drill_markdown,
     write_influence_matrix_json,
     write_influence_matrix_markdown,
+    write_landscape_json,
+    write_landscape_markdown,
+    load_trace_inputs,
 )
 from agent_tracegrad.evaluation import run_trace_level_evaluation, write_evaluation_artifacts
 from agent_tracegrad.model import HuggingFaceCausalLMAdapter
@@ -171,6 +175,49 @@ def build_parser() -> argparse.ArgumentParser:
         help="JSON file containing candidate actions as objects with action_id/text or an id-to-text map.",
     )
     drill.add_argument("--trust-remote-code", action="store_true", help="Pass trust_remote_code=True to transformers.")
+    landscape = subparsers.add_parser("landscape", help="Run harness-only landscape analysis over failed traces.")
+    landscape.add_argument("--traces", required=True, help="Trace JSON file or directory of trace JSON files.")
+    landscape.add_argument(
+        "--input-format",
+        choices=trace_adapter_names(),
+        default="json-fixture",
+        help="Trace adapter to use before landscape analysis.",
+    )
+    landscape.add_argument("--model", required=True, help="Local HuggingFace causal LM path or model name.")
+    landscape.add_argument("--target-node-id", action="append", help="Agent node id to explain for every trace.")
+    landscape.add_argument(
+        "--target-marker",
+        choices=failure_target_marker_names(),
+        default=None,
+        help="Failure target marker to use when --target-node-id is omitted.",
+    )
+    landscape.add_argument("--output-dir", required=True, help="Directory to write landscape artifacts.")
+    landscape.add_argument("--output-prefix", default="tracegrad-landscape", help="Artifact filename prefix.")
+    _add_objective_args(landscape)
+    landscape.add_argument(
+        "--method",
+        choices=("gradient_saliency", "gradient_times_input", "integrated_gradients"),
+        default="gradient_saliency",
+        help="Attribution method to run.",
+    )
+    landscape.add_argument("--execution-model-name", default=None, help="Optional execution model identity.")
+    landscape.add_argument("--device", default=None, help="Torch device passed to the HF adapter, for example cuda:0.")
+    landscape.add_argument(
+        "--devices",
+        default=None,
+        help="Comma-separated CUDA devices for model sharding, for example cuda:0,cuda:1.",
+    )
+    landscape.add_argument("--dtype", choices=("float16", "bfloat16", "float32"), default=None)
+    landscape.add_argument("--ig-steps", type=int, default=16, help="Integrated-gradient steps when selected.")
+    landscape.add_argument("--topk-mean-k", type=int, default=5, help="k for the topk_mean aggregation view.")
+    landscape.add_argument("--ranking-grain", choices=("node", "sub_block_kind"), default="node")
+    landscape.add_argument(
+        "--ranking-view",
+        choices=("sum", "mean", "length_norm", "topk_mean"),
+        default="sum",
+    )
+    landscape.add_argument("--top-k", type=int, default=3, help="Top harness components per trace.")
+    landscape.add_argument("--trust-remote-code", action="store_true", help="Pass trust_remote_code=True to transformers.")
     evaluate = subparsers.add_parser("evaluate", help="Run an attribution evaluation suite.")
     evaluate.add_argument("--trace", required=True, help="Path to a trace JSON file.")
     evaluate.add_argument(
@@ -252,6 +299,9 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.command == "drill":
         _run_drill(args)
+        return 0
+    if args.command == "landscape":
+        _run_landscape(args)
         return 0
     if args.command == "evaluate":
         _run_evaluate(args)
@@ -396,6 +446,32 @@ def _run_drill(args: argparse.Namespace) -> None:
         )
         write_influence_matrix_json(matrix, output_dir / f"{args.output_prefix}-matrix.json")
         write_influence_matrix_markdown(matrix, output_dir / f"{args.output_prefix}-matrix.md")
+
+
+def _run_landscape(args: argparse.Namespace) -> None:
+    trace_inputs = load_trace_inputs(args.traces)
+    model = _load_model(args)
+    target_node_ids = tuple(args.target_node_id) if args.target_node_id else None
+    result = run_landscape(
+        trace_inputs,
+        model=model,
+        expected_target_text=_optional_expected_text(args),
+        input_format=args.input_format,
+        target_node_ids=target_node_ids,
+        target_marker=args.target_marker,
+        target_id=args.target_id,
+        target_span=_target_span(args),
+        method=args.method,
+        execution_model_name=args.execution_model_name,
+        topk_mean_k=args.topk_mean_k,
+        ranking_grain=args.ranking_grain,
+        ranking_view=args.ranking_view,
+        integrated_gradients_steps=args.ig_steps,
+        top_k=args.top_k,
+    )
+    output_dir = Path(args.output_dir)
+    write_landscape_json(result, output_dir / f"{args.output_prefix}.json")
+    write_landscape_markdown(result, output_dir / f"{args.output_prefix}.md")
 
 
 def _add_objective_args(parser: argparse.ArgumentParser) -> None:
