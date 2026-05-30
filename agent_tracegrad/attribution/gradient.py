@@ -195,7 +195,7 @@ def _attribute_objective_with_gradients(
     if gradients is None:
         raise RuntimeError("input embedding gradients were not populated")
     scores = gradients if mode == "gradient" else gradients * inputs_embeds.detach()
-    token_scores = _token_scores_from_vectors(scores, signed=objective.objective_type == "contrastive").squeeze(0)
+    token_scores = _token_scores_from_vectors(scores).squeeze(0)
     token_scores = token_scores[: objective_input.trace_token_count]
     token_scores = _zero_agent_scores(token_scores, trace)
     result = AttributionResult(
@@ -289,7 +289,7 @@ def _attribute_objective_integrated_gradients(
         accumulated_gradients = accumulated_gradients + gradients
     average_gradients = accumulated_gradients / steps
     attributions = (actual_embeds - baseline) * average_gradients
-    token_scores = _token_scores_from_vectors(attributions, signed=objective.objective_type == "contrastive").squeeze(0)
+    token_scores = _token_scores_from_vectors(attributions).squeeze(0)
     token_scores = token_scores[: objective_input.trace_token_count]
     token_scores = _zero_agent_scores(token_scores, trace)
     result = AttributionResult(
@@ -477,8 +477,10 @@ def _attribute_anchored_objective_with_gradients(
             score_scale=-1.0,
         )
         loss = bad_loss - expected_loss
-        combined = bad_prefix_vectors + expected_prefix_vectors
-        return _anchored_objective_result(
+        bad_prefix_scores = _token_scores_from_vectors(bad_prefix_vectors).squeeze(0)
+        expected_prefix_scores = _token_scores_from_vectors(expected_prefix_vectors).squeeze(0)
+        margin_prefix_scores = bad_prefix_scores - expected_prefix_scores
+        return _anchored_objective_result_from_scores(
             trace,
             objective,
             model,
@@ -486,8 +488,16 @@ def _attribute_anchored_objective_with_gradients(
             execution_model_name,
             objective_input,
             loss,
-            combined,
-            signed=objective.objective_type == "contrastive",
+            margin_prefix_scores,
+            metadata=_contrastive_components_metadata(
+                trace,
+                objective_input,
+                bad_prefix_scores,
+                expected_prefix_scores,
+                margin_prefix_scores,
+                bad_loss=bad_loss,
+                expected_loss=expected_loss,
+            ),
         )
     if objective.objective_type != "expected_action":
         raise ValueError("anchored objective only supports expected_action or contrastive")
@@ -542,12 +552,32 @@ def _anchored_objective_result(
     objective_input: _AnchoredObjectiveInput,
     loss,
     prefix_vectors,
-    signed: bool = False,
 ) -> AttributionResult:
-    import torch
+    prefix_scores = _token_scores_from_vectors(prefix_vectors).squeeze(0)
+    return _anchored_objective_result_from_scores(
+        trace,
+        objective,
+        model,
+        method_name,
+        execution_model_name,
+        objective_input,
+        loss,
+        prefix_scores,
+    )
 
-    combined = prefix_vectors
-    prefix_scores = _token_scores_from_vectors(combined, signed=signed).squeeze(0)
+
+def _anchored_objective_result_from_scores(
+    trace: SerializedTrace,
+    objective: TargetObjective,
+    model: ModelAdapter,
+    method_name: str,
+    execution_model_name: str | None,
+    objective_input: _AnchoredObjectiveInput,
+    loss,
+    prefix_scores,
+    *,
+    metadata: dict | None = None,
+) -> AttributionResult:
     token_scores = _pad_prefix_scores(prefix_scores, objective_input.trace_token_count)
     token_scores = _zero_agent_scores(token_scores, trace)
     result = AttributionResult(
@@ -560,6 +590,7 @@ def _anchored_objective_result(
         metadata={
             **_objective_result_metadata(objective, loss),
             **_anchored_objective_metadata(objective_input),
+            **(metadata or {}),
         },
     )
     result.validate_against_trace(trace)
@@ -619,32 +650,47 @@ def _attribute_anchored_objective_integrated_gradients(
             expected_accumulated = expected_accumulated + expected_grad
         final_loss = loss
     expected_attributions = (expected_actual - expected_baseline) * (expected_accumulated / steps)
-    prefix_vectors = [expected_attributions[:, : objective_input.prefix_token_count, :]]
     if bad_state is not None:
         bad_actual, bad_baseline, bad_accumulated = bad_state
         bad_attributions = (bad_actual - bad_baseline) * (bad_accumulated / steps)
-        prefix_vectors.insert(0, bad_attributions[:, : objective_input.prefix_token_count, :])
-    combined = sum(prefix_vectors)
-    prefix_scores = _token_scores_from_vectors(combined, signed=objective.objective_type == "contrastive").squeeze(0)
-    token_scores = _pad_prefix_scores(prefix_scores, objective_input.trace_token_count)
-    token_scores = _zero_agent_scores(token_scores, trace)
+        bad_prefix_scores = _token_scores_from_vectors(
+            bad_attributions[:, : objective_input.prefix_token_count, :]
+        ).squeeze(0)
+        expected_prefix_scores = _token_scores_from_vectors(
+            expected_attributions[:, : objective_input.prefix_token_count, :]
+        ).squeeze(0)
+        margin_prefix_scores = bad_prefix_scores - expected_prefix_scores
+        prefix_scores = margin_prefix_scores
+        metadata = _contrastive_components_metadata(
+            trace,
+            objective_input,
+            bad_prefix_scores,
+            expected_prefix_scores,
+            margin_prefix_scores,
+            bad_loss=bad_score,
+            expected_loss=expected_score,
+        )
+    else:
+        prefix_scores = _token_scores_from_vectors(
+            expected_attributions[:, : objective_input.prefix_token_count, :]
+        ).squeeze(0)
+        metadata = None
     if final_loss is None:
         raise RuntimeError("integrated gradients did not run any steps")
-    result = AttributionResult(
-        method_name="integrated_gradients",
-        attribution_model_name=model.name,
-        execution_model_name=execution_model_name,
-        same_model=execution_model_name is not None and model.name == execution_model_name,
-        target_id=objective.objective_id,
-        token_scores=tuple(token_scores.detach().cpu().tolist()),
+    return _anchored_objective_result_from_scores(
+        trace,
+        objective,
+        model,
+        "integrated_gradients",
+        execution_model_name,
+        objective_input,
+        final_loss,
+        prefix_scores,
         metadata={
-            **_objective_result_metadata(objective, final_loss),
-            **_anchored_objective_metadata(objective_input),
+            **(metadata or {}),
             "steps": steps,
         },
     )
-    result.validate_against_trace(trace)
-    return result
 
 
 def _resolve_expected_start_token(objective_input: _ObjectiveInput, input_ids) -> _ObjectiveInput:
@@ -729,6 +775,34 @@ def _anchored_objective_metadata(objective_input: _AnchoredObjectiveInput) -> di
     }
 
 
+def _contrastive_components_metadata(
+    trace: SerializedTrace,
+    objective_input: _AnchoredObjectiveInput,
+    bad_prefix_scores,
+    expected_prefix_scores,
+    margin_prefix_scores,
+    *,
+    bad_loss,
+    expected_loss,
+) -> dict:
+    bad_scores = _pad_prefix_scores(bad_prefix_scores, objective_input.trace_token_count)
+    expected_scores = _pad_prefix_scores(expected_prefix_scores, objective_input.trace_token_count)
+    margin_scores = _pad_prefix_scores(margin_prefix_scores, objective_input.trace_token_count)
+    bad_scores = _zero_agent_scores(bad_scores, trace)
+    expected_scores = _zero_agent_scores(expected_scores, trace)
+    margin_scores = _zero_agent_scores(margin_scores, trace)
+    return {
+        "score_semantics": "bad_support_minus_expected_support",
+        "bad_support_score": float(bad_loss.detach().cpu()),
+        "expected_support_score": float(expected_loss.detach().cpu()),
+        "contrastive_components": {
+            "bad_token_scores": tuple(bad_scores.detach().cpu().tolist()),
+            "expected_token_scores": tuple(expected_scores.detach().cpu().tolist()),
+            "margin_token_scores": tuple(margin_scores.detach().cpu().tolist()),
+        },
+    }
+
+
 def _target_token_positions(target: FailureTarget, trace: SerializedTrace) -> tuple[int, ...]:
     positions: set[int] = set()
     if target.span is not None:
@@ -780,14 +854,10 @@ def _pad_prefix_scores(prefix_scores, trace_token_count: int):
     return token_scores
 
 
-def _token_scores_from_vectors(vectors, *, signed: bool = False):
+def _token_scores_from_vectors(vectors):
     import torch
 
-    magnitudes = torch.linalg.vector_norm(vectors, dim=-1)
-    if not signed:
-        return magnitudes
-    signs = torch.sign(vectors.sum(dim=-1))
-    return magnitudes * signs
+    return torch.linalg.vector_norm(vectors, dim=-1)
 
 
 def _zero_agent_scores(token_scores, trace: SerializedTrace):

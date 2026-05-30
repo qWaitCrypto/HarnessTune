@@ -159,9 +159,12 @@ def test_contrastive_objective_can_produce_signed_scores() -> None:
             del attention_mask
             logits = torch.zeros_like(inputs_embeds)
             if inputs_embeds.shape[1] > 3:
-                prefix_signal = inputs_embeds[:, 0, 0]
-                logits[:, 2, 3] = -4.0 * prefix_signal
-                logits[:, 2, 5] = 4.0 * prefix_signal
+                expected_signal = inputs_embeds[:, 0, 0]
+                bad_signal = inputs_embeds[:, 1, 1]
+                bad_branch = inputs_embeds[:, 3, 3]
+                expected_branch = inputs_embeds[:, 3, 5]
+                logits[:, 2, 3] = 4.0 * bad_signal * bad_branch
+                logits[:, 2, 5] = 4.0 * expected_signal * expected_branch
             return ModelForwardOutput(logits=logits)
 
     trace = make_trace()
@@ -171,7 +174,19 @@ def test_contrastive_objective_can_produce_signed_scores() -> None:
 
     result = GradientSaliencyAttribution().attribute_objective(trace, objective, SignedContrastiveModel())
 
+    components = result.metadata["contrastive_components"]
+    bad_scores = components["bad_token_scores"]
+    expected_scores = components["expected_token_scores"]
+    margin_scores = components["margin_token_scores"]
+
+    assert result.metadata["score_semantics"] == "bad_support_minus_expected_support"
+    assert result.token_scores == margin_scores
+    assert any(bad > expected for bad, expected in zip(bad_scores, expected_scores, strict=True))
+    assert any(expected > bad for bad, expected in zip(bad_scores, expected_scores, strict=True))
     assert any(score < 0.0 for score in result.token_scores)
+    assert any(score > 0.0 for score in result.token_scores)
+    for bad_score, expected_score, margin_score in zip(bad_scores, expected_scores, margin_scores, strict=True):
+        assert margin_score == pytest.approx(bad_score - expected_score)
     assert result.token_scores[3:] == (0.0, 0.0)
 
 

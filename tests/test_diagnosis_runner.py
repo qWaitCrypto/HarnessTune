@@ -63,9 +63,12 @@ class SignedContrastiveModel(TinyBackwardModel):
         del attention_mask
         logits = torch.zeros_like(inputs_embeds)
         if inputs_embeds.shape[1] > 3:
-            prefix_signal = inputs_embeds[:, 0, 0]
-            logits[:, 2, 3] = -4.0 * prefix_signal
-            logits[:, 2, 5] = 4.0 * prefix_signal
+            expected_signal = inputs_embeds[:, 0, 0]
+            bad_signal = inputs_embeds[:, 1, 1]
+            bad_branch = inputs_embeds[:, 3, 3]
+            expected_branch = inputs_embeds[:, 3, 5]
+            logits[:, 2, 3] = 4.0 * bad_signal * bad_branch
+            logits[:, 2, 5] = 4.0 * expected_signal * expected_branch
         return ModelForwardOutput(logits=logits)
 
 
@@ -108,6 +111,41 @@ def _make_raw_trace():
                 "sub_block_kind": "agent.content",
                 "content": "three four",
                 "sequence_index": 2,
+            },
+        ]
+    }
+
+
+def _make_signed_raw_trace():
+    return {
+        "nodes": [
+            {
+                "node_id": "expected-rule",
+                "block_role": "system",
+                "sub_block_kind": "system.instruction",
+                "content": "zero",
+                "sequence_index": 0,
+            },
+            {
+                "node_id": "bad-rule",
+                "block_role": "system",
+                "sub_block_kind": "system.instruction",
+                "content": "one",
+                "sequence_index": 1,
+            },
+            {
+                "node_id": "user-1",
+                "block_role": "user",
+                "sub_block_kind": "user.content",
+                "content": "two",
+                "sequence_index": 2,
+            },
+            {
+                "node_id": "agent-1",
+                "block_role": "agent",
+                "sub_block_kind": "agent.content",
+                "content": "three four",
+                "sequence_index": 3,
             },
         ]
     }
@@ -211,7 +249,7 @@ class TestFullDiagnosis:
 
     def test_contrastive_margin_can_be_negative_and_preserved(self) -> None:
         result = run_diagnosis(
-            _make_raw_trace(),
+            _make_signed_raw_trace(),
             model=SignedContrastiveModel(),
             target_node_ids=("agent-1",),
             expected_target_text="five six",
@@ -222,9 +260,14 @@ class TestFullDiagnosis:
             if md.grain == "node" and md.view_name == "sum"
         )
 
+        components = result.contrastive_result.attribution.metadata["contrastive_components"]
         assert any(score < 0.0 for score in result.contrastive_result.attribution.token_scores)
-        assert any(contribution.margin < 0.0 for contribution in node_sum.contributions)
-        assert any(contribution.classification == "preserve" for contribution in node_sum.contributions)
+        assert result.contrastive_result.attribution.token_scores == components["margin_token_scores"]
+        by_id = {contribution.instance_id: contribution for contribution in node_sum.contributions}
+        assert by_id["expected-rule"].margin < 0.0
+        assert by_id["expected-rule"].classification == "preserve"
+        assert by_id["bad-rule"].margin > 0.0
+        assert by_id["bad-rule"].classification == "narrow"
 
 
 class TestComponentClassification:
