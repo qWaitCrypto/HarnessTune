@@ -251,7 +251,11 @@ def load_diagnosis_inputs(path: str | Path) -> tuple[tuple[str, DiagnosisResult,
     root = Path(path)
     if root.is_file():
         return ((_trace_id(root), read_diagnosis_json(root), str(root)),)
-    files = sorted(item for item in root.iterdir() if item.is_file() and item.suffix == ".json")
+    files = sorted(
+        item
+        for item in root.iterdir()
+        if item.is_file() and item.suffix == ".json" and not item.stem.endswith("-boundary")
+    )
     return tuple((_trace_id(item), read_diagnosis_json(item), str(item)) for item in files)
 
 

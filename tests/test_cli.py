@@ -296,6 +296,8 @@ def test_cli_diagnose_writes_artifacts(tmp_path, monkeypatch) -> None:
     assert (output_dir / "diag.json").exists()
     assert (output_dir / "diag.md").exists()
     assert (output_dir / "diag.html").exists()
+    assert (output_dir / "diag-boundary.json").exists()
+    assert (output_dir / "diag-boundary.md").exists()
     payload = json.loads((output_dir / "diag.json").read_text(encoding="utf-8"))
     assert payload["metadata"]["mode"] == "full_diagnosis"
     assert payload["confidence_level"] in ("medium", "strong")

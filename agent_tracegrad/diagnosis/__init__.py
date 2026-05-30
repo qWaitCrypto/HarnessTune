@@ -1,6 +1,15 @@
 """Diagnostic product modules."""
 
 from agent_tracegrad.diagnosis.atomizer import ComponentAtom, atomize_node, atomize_policy_text, atomize_tool_schema
+from agent_tracegrad.diagnosis.boundary import (
+    BoundaryComponent,
+    DecisionBoundaryArtifact,
+    build_decision_boundary_artifact,
+    decision_boundary_to_dict,
+    decision_boundary_to_markdown,
+    write_decision_boundary_json,
+    write_decision_boundary_markdown,
+)
 from agent_tracegrad.diagnosis.drill import (
     AtomAttribution,
     DrillResult,
@@ -63,9 +72,11 @@ from agent_tracegrad.diagnosis.types import (
 
 __all__ = [
     "AtomAttribution",
+    "BoundaryComponent",
     "CandidateAction",
     "ComponentAtom",
     "ComponentClassification",
+    "DecisionBoundaryArtifact",
     "DiagnosisAblation",
     "DiagnosisEvidence",
     "DiagnosisResult",
@@ -84,6 +95,9 @@ __all__ = [
     "atomize_node",
     "atomize_policy_text",
     "atomize_tool_schema",
+    "build_decision_boundary_artifact",
+    "decision_boundary_to_dict",
+    "decision_boundary_to_markdown",
     "detect_diagnostic_labels",
     "diagnostic_label_to_dict",
     "diagnosis_to_html",
@@ -108,6 +122,8 @@ __all__ = [
     "write_diagnosis_html",
     "write_diagnosis_markdown",
     "write_diagnosis_json",
+    "write_decision_boundary_json",
+    "write_decision_boundary_markdown",
     "write_drill_json",
     "write_drill_markdown",
     "write_influence_matrix_json",

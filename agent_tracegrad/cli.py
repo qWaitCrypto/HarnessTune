@@ -10,6 +10,7 @@ from typing import Any
 from agent_tracegrad.analysis import analyze_trace, write_analysis_json
 from agent_tracegrad.diagnosis import (
     CandidateAction,
+    build_decision_boundary_artifact,
     read_diagnosis_json,
     run_diagnosis,
     run_drill,
@@ -18,6 +19,8 @@ from agent_tracegrad.diagnosis import (
     write_diagnosis_json,
     write_diagnosis_markdown,
     write_diagnosis_html,
+    write_decision_boundary_json,
+    write_decision_boundary_markdown,
     write_drill_json,
     write_drill_markdown,
     write_influence_matrix_json,
@@ -219,6 +222,10 @@ def _run_diagnose(args: argparse.Namespace) -> None:
     write_diagnosis_json(result, output_dir / f"{args.output_prefix}.json")
     write_diagnosis_markdown(result, output_dir / f"{args.output_prefix}.md")
     write_diagnosis_html(result, output_dir / f"{args.output_prefix}.html")
+    if result.margin_distributions:
+        boundary = build_decision_boundary_artifact(result, view_name=args.ranking_view)
+        write_decision_boundary_json(boundary, output_dir / f"{args.output_prefix}-boundary.json")
+        write_decision_boundary_markdown(boundary, output_dir / f"{args.output_prefix}-boundary.md")
 
 
 def _run_drill(args: argparse.Namespace) -> None:

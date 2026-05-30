@@ -6,6 +6,9 @@ from dataclasses import dataclass
 
 from agent_tracegrad.diagnosis import (
     DiagnosisResult,
+    build_decision_boundary_artifact,
+    decision_boundary_to_dict,
+    decision_boundary_to_markdown,
     diagnosis_from_dict,
     diagnosis_to_dict,
     run_diagnosis,
@@ -313,3 +316,35 @@ class TestSerialization:
         text = output.read_text()
         assert "# Agent TraceGrad Diagnosis Report" in text
         assert "Component Ranking" in text
+
+
+class TestDecisionBoundaryArtifact:
+    def test_builds_directional_boundary_from_full_diagnosis(self) -> None:
+        result = run_diagnosis(
+            _make_raw_trace(),
+            model=TinyBackwardModel(),
+            target_node_ids=("agent-1",),
+            expected_target_text="five six",
+        )
+
+        artifact = build_decision_boundary_artifact(result)
+        payload = decision_boundary_to_dict(artifact)
+
+        assert payload["target"]["target_id"] == result.bad_result.target.target_id
+        assert payload["objective_formula"] == "log P(bad_target | context) - log P(expected_target | context)"
+        assert payload["components"]
+        assert all(item["direction"] in ("pushes_bad", "pushes_expected", "neutral") for item in payload["components"])
+
+    def test_boundary_markdown_has_decision_sections(self) -> None:
+        result = run_diagnosis(
+            _make_raw_trace(),
+            model=TinyBackwardModel(),
+            target_node_ids=("agent-1",),
+            expected_target_text="five six",
+        )
+
+        markdown = decision_boundary_to_markdown(build_decision_boundary_artifact(result))
+
+        assert "# Agent TraceGrad Decision Boundary" in markdown
+        assert "Components Pushing Toward Bad" in markdown
+        assert "Components Supporting Expected" in markdown
