@@ -8,7 +8,14 @@ from pathlib import Path
 from typing import Any
 
 from agent_tracegrad.analysis import analyze_trace, write_analysis_json
-from agent_tracegrad.diagnosis import run_diagnosis, write_diagnosis_json, write_diagnosis_markdown
+from agent_tracegrad.diagnosis import (
+    run_diagnosis,
+    run_drill,
+    write_diagnosis_json,
+    write_diagnosis_markdown,
+    write_drill_json,
+    write_drill_markdown,
+)
 from agent_tracegrad.evaluation import run_trace_level_evaluation, write_evaluation_artifacts
 from agent_tracegrad.model import HuggingFaceCausalLMAdapter
 from agent_tracegrad.target import ExpectedTarget, FailureTarget, TargetObjective, failure_target_marker_names
@@ -107,6 +114,48 @@ def build_parser() -> argparse.ArgumentParser:
     diagnose.add_argument("--control-ablation", action="store_true", help="Also ablate low-ranked control nodes.")
     diagnose.add_argument("--ablation-placeholder", default="[ABLATE]", help="Replacement text for ablated nodes.")
     diagnose.add_argument("--trust-remote-code", action="store_true", help="Pass trust_remote_code=True to transformers.")
+    drill = subparsers.add_parser("drill", help="Run policy/tool atom drill-down for one failed trace.")
+    drill.add_argument("--trace", required=True, help="Path to a trace JSON file.")
+    drill.add_argument(
+        "--input-format",
+        choices=trace_adapter_names(),
+        default="json-fixture",
+        help="Trace adapter to use before drill-down.",
+    )
+    drill.add_argument("--model", required=True, help="Local HuggingFace causal LM path or model name.")
+    drill.add_argument("--target-node-id", action="append", help="Agent node id to explain.")
+    drill.add_argument(
+        "--target-marker",
+        choices=failure_target_marker_names(),
+        default=None,
+        help="Failure target marker to use when --target-node-id is omitted.",
+    )
+    drill.add_argument("--output-dir", required=True, help="Directory to write drill artifacts.")
+    drill.add_argument("--output-prefix", default="tracegrad-drill", help="Artifact filename prefix.")
+    _add_objective_args(drill)
+    drill.add_argument(
+        "--method",
+        choices=("gradient_saliency", "gradient_times_input", "integrated_gradients"),
+        default="gradient_saliency",
+        help="Attribution method to run.",
+    )
+    drill.add_argument("--execution-model-name", default=None, help="Optional execution model identity.")
+    drill.add_argument("--device", default=None, help="Torch device passed to the HF adapter, for example cuda:0.")
+    drill.add_argument(
+        "--devices",
+        default=None,
+        help="Comma-separated CUDA devices for model sharding, for example cuda:0,cuda:1.",
+    )
+    drill.add_argument("--dtype", choices=("float16", "bfloat16", "float32"), default=None)
+    drill.add_argument("--ig-steps", type=int, default=16, help="Integrated-gradient steps when selected.")
+    drill.add_argument("--topk-mean-k", type=int, default=5, help="k for the topk_mean aggregation view.")
+    drill.add_argument("--ranking-grain", choices=("node", "sub_block_kind"), default="node")
+    drill.add_argument(
+        "--ranking-view",
+        choices=("sum", "mean", "length_norm", "topk_mean"),
+        default="sum",
+    )
+    drill.add_argument("--trust-remote-code", action="store_true", help="Pass trust_remote_code=True to transformers.")
     evaluate = subparsers.add_parser("evaluate", help="Run an attribution evaluation suite.")
     evaluate.add_argument("--trace", required=True, help="Path to a trace JSON file.")
     evaluate.add_argument(
@@ -185,6 +234,9 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.command == "diagnose":
         _run_diagnose(args)
+        return 0
+    if args.command == "drill":
+        _run_drill(args)
         return 0
     if args.command == "evaluate":
         _run_evaluate(args)
@@ -279,6 +331,35 @@ def _run_diagnose(args: argparse.Namespace) -> None:
     output_dir = Path(args.output_dir)
     write_diagnosis_json(result, output_dir / f"{args.output_prefix}.json")
     write_diagnosis_markdown(result, output_dir / f"{args.output_prefix}.md")
+
+
+def _run_drill(args: argparse.Namespace) -> None:
+    with open(args.trace, "r", encoding="utf-8") as handle:
+        raw_trace = json.load(handle)
+    model = _load_model(args)
+    target_node_ids = tuple(args.target_node_id) if args.target_node_id else None
+    diagnosis = run_diagnosis(
+        raw_trace,
+        input_format=args.input_format,
+        target_node_ids=target_node_ids,
+        target_marker=args.target_marker,
+        model=model,
+        method=args.method,
+        execution_model_name=args.execution_model_name,
+        target_id=args.target_id,
+        target_span=_target_span(args),
+        expected_target_text=_optional_expected_text(args),
+        expected_target_id=args.expected_target_id,
+        topk_mean_k=args.topk_mean_k,
+        ranking_grain=args.ranking_grain,
+        ranking_view=args.ranking_view,
+        integrated_gradients_steps=args.ig_steps,
+        trace_metadata={"trace_path": args.trace},
+    )
+    drill = run_drill(diagnosis)
+    output_dir = Path(args.output_dir)
+    write_drill_json(drill, output_dir / f"{args.output_prefix}.json")
+    write_drill_markdown(drill, output_dir / f"{args.output_prefix}.md")
 
 
 def _add_objective_args(parser: argparse.ArgumentParser) -> None:
