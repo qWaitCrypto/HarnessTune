@@ -10,6 +10,12 @@ from agent_tracegrad.diagnosis.drill import (
     write_drill_json,
     write_drill_markdown,
 )
+from agent_tracegrad.diagnosis.html_report import (
+    diagnosis_to_html,
+    landscape_to_html,
+    write_diagnosis_html,
+    write_landscape_html,
+)
 from agent_tracegrad.diagnosis.influence import (
     CandidateAction,
     InfluenceCell,
@@ -76,6 +82,7 @@ __all__ = [
     "atomize_tool_schema",
     "detect_diagnostic_labels",
     "diagnostic_label_to_dict",
+    "diagnosis_to_html",
     "diagnosis_to_markdown",
     "diagnosis_to_dict",
     "drill_result_to_dict",
@@ -83,12 +90,14 @@ __all__ = [
     "influence_matrix_to_dict",
     "influence_matrix_to_markdown",
     "landscape_to_dict",
+    "landscape_to_html",
     "landscape_to_markdown",
     "load_trace_inputs",
     "run_diagnosis",
     "run_drill",
     "run_influence_matrix",
     "run_landscape",
+    "write_diagnosis_html",
     "write_diagnosis_markdown",
     "write_diagnosis_json",
     "write_drill_json",
@@ -96,5 +105,6 @@ __all__ = [
     "write_influence_matrix_json",
     "write_influence_matrix_markdown",
     "write_landscape_json",
+    "write_landscape_html",
     "write_landscape_markdown",
 ]

@@ -295,6 +295,7 @@ def test_cli_diagnose_writes_artifacts(tmp_path, monkeypatch) -> None:
     assert exit_code == 0
     assert (output_dir / "diag.json").exists()
     assert (output_dir / "diag.md").exists()
+    assert (output_dir / "diag.html").exists()
     payload = json.loads((output_dir / "diag.json").read_text(encoding="utf-8"))
     assert payload["metadata"]["mode"] == "full_diagnosis"
     assert payload["confidence_level"] in ("medium", "strong")
@@ -480,6 +481,7 @@ def test_cli_landscape_writes_artifacts(tmp_path, monkeypatch) -> None:
     assert exit_code == 0
     assert (output_dir / "landscape.json").exists()
     assert (output_dir / "landscape.md").exists()
+    assert (output_dir / "landscape.html").exists()
     payload = json.loads((output_dir / "landscape.json").read_text(encoding="utf-8"))
     assert payload["metadata"]["trace_count"] == 2
     assert payload["component_stats"]

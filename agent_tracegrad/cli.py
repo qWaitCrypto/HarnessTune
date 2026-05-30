@@ -16,12 +16,14 @@ from agent_tracegrad.diagnosis import (
     run_landscape,
     write_diagnosis_json,
     write_diagnosis_markdown,
+    write_diagnosis_html,
     write_drill_json,
     write_drill_markdown,
     write_influence_matrix_json,
     write_influence_matrix_markdown,
     write_landscape_json,
     write_landscape_markdown,
+    write_landscape_html,
     load_trace_inputs,
 )
 from agent_tracegrad.evaluation import run_trace_level_evaluation, write_evaluation_artifacts
@@ -396,6 +398,7 @@ def _run_diagnose(args: argparse.Namespace) -> None:
     output_dir = Path(args.output_dir)
     write_diagnosis_json(result, output_dir / f"{args.output_prefix}.json")
     write_diagnosis_markdown(result, output_dir / f"{args.output_prefix}.md")
+    write_diagnosis_html(result, output_dir / f"{args.output_prefix}.html")
 
 
 def _run_drill(args: argparse.Namespace) -> None:
@@ -472,6 +475,7 @@ def _run_landscape(args: argparse.Namespace) -> None:
     output_dir = Path(args.output_dir)
     write_landscape_json(result, output_dir / f"{args.output_prefix}.json")
     write_landscape_markdown(result, output_dir / f"{args.output_prefix}.md")
+    write_landscape_html(result, output_dir / f"{args.output_prefix}.html")
 
 
 def _add_objective_args(parser: argparse.ArgumentParser) -> None:
