@@ -144,7 +144,7 @@ def analyze_trace(
         AnalysisRanking(
             grain=distribution.grain,
             view_name=distribution.view_name,
-            items=rank_distribution(distribution),
+            items=rank_distribution(distribution, rank_by=_rank_by_for_view(distribution.view_name)),
         )
         for distribution in distributions
     )
@@ -387,6 +387,16 @@ def _require_distribution(
         if distribution.grain == grain and distribution.view_name == view_name:
             return distribution
     raise ValueError(f"no distribution for grain={grain!r}, view_name={view_name!r}")
+
+
+def _rank_by_for_view(view_name: str) -> str:
+    if view_name in {"abs_sum", "topk_abs_mean"}:
+        return "abs"
+    if view_name == "negative_sum":
+        return "negative"
+    if view_name == "positive_sum":
+        return "positive"
+    return "value"
 
 
 def _distribution_to_dict(distribution: AttributionDistribution) -> dict[str, Any]:

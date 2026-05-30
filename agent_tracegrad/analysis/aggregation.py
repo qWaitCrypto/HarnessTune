@@ -11,7 +11,17 @@ from agent_tracegrad.attribution.result import AttributionResult
 from agent_tracegrad.trace.schema import SerializedTrace
 
 AGGREGATION_GRAINS = ("node", "sub_block_kind")
-AGGREGATION_VIEWS = ("sum", "mean", "length_norm", "topk_mean")
+AGGREGATION_VIEWS = (
+    "sum",
+    "mean",
+    "length_norm",
+    "topk_mean",
+    "net_sum",
+    "positive_sum",
+    "negative_sum",
+    "abs_sum",
+    "topk_abs_mean",
+)
 
 
 @dataclass(frozen=True)
@@ -135,31 +145,44 @@ def _views(scores: Sequence[float], *, topk: int) -> Mapping[str, float]:
     count = len(scores)
     k = min(topk, count)
     top_scores = sorted(scores, reverse=True)[:k]
+    abs_scores = [abs(score) for score in scores]
+    top_abs_scores = sorted(abs_scores, reverse=True)[:k]
+    positive_sum = sum(score for score in scores if score > 0.0)
+    negative_sum = sum(score for score in scores if score < 0.0)
     return {
         "sum": total,
         "mean": total / count,
         "length_norm": total / log(1.0 + count),
         "topk_mean": sum(top_scores) / k,
+        "net_sum": total,
+        "positive_sum": positive_sum,
+        "negative_sum": negative_sum,
+        "abs_sum": sum(abs_scores),
+        "topk_abs_mean": sum(top_abs_scores) / k,
     }
 
 
 def _distribution_stats(scores: Sequence[float]) -> Mapping[str, float]:
     if not scores:
         return {"entropy": 0.0, "top1_mass": 0.0, "top3_mass": 0.0, "gini": 0.0}
-    if any(score < 0.0 or not isfinite(score) for score in scores):
+    if any(not isfinite(score) for score in scores):
         nan = float("nan")
         return {"entropy": nan, "top1_mass": nan, "top3_mass": nan, "gini": nan}
-    total = sum(scores)
+    abs_scores = [abs(score) for score in scores]
+    total = sum(abs_scores)
     if total == 0.0:
         return {"entropy": 0.0, "top1_mass": 0.0, "top3_mass": 0.0, "gini": 0.0}
-    probabilities = [score / total for score in scores if score > 0.0]
+    probabilities = [score / total for score in abs_scores if score > 0.0]
     entropy = -sum(probability * log(probability) for probability in probabilities)
-    sorted_probabilities = sorted((score / total for score in scores), reverse=True)
+    sorted_probabilities = sorted((score / total for score in abs_scores), reverse=True)
     return {
         "entropy": entropy,
         "top1_mass": sorted_probabilities[0],
         "top3_mass": sum(sorted_probabilities[:3]),
-        "gini": _gini(scores),
+        "gini": _gini(abs_scores),
+        "positive_mass": sum(score for score in scores if score > 0.0) / total,
+        "negative_mass": abs(sum(score for score in scores if score < 0.0)) / total,
+        "net_direction": sum(scores) / total,
     }
 
 

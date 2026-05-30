@@ -154,6 +154,28 @@ def test_cli_evaluate_parser_accepts_objective_and_operator_args() -> None:
     assert args.ablation_k == [1, 2]
 
 
+def test_cli_diagnose_defaults_to_abs_sum_ranking_view() -> None:
+    parser = build_parser()
+
+    args = parser.parse_args(
+        [
+            "diagnose",
+            "--trace",
+            "trace.json",
+            "--model",
+            "/models/formal",
+            "--target-node-id",
+            "agent-1",
+            "--expected-target-text",
+            "I cannot do that.",
+            "--output-dir",
+            "out",
+        ]
+    )
+
+    assert args.ranking_view == "abs_sum"
+
+
 def test_cli_evaluate_writes_artifacts(tmp_path, monkeypatch) -> None:
     pytest.importorskip("torch")
     trace_path = tmp_path / "trace.json"

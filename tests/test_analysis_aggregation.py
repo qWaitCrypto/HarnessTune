@@ -47,7 +47,7 @@ def by_key(distributions, *, grain: str, view_name: str):
 def test_aggregate_attribution_builds_node_and_kind_distributions_without_agent_instances() -> None:
     distributions = aggregate_attribution(make_trace(), make_result(), topk=2)
 
-    assert len(distributions) == 8
+    assert len(distributions) == 18
     node_sum = by_key(distributions, grain="node", view_name="sum")
     assert [item.instance_id for item in node_sum.instances] == ["sys-1", "sys-2", "user-1"]
     assert all(item.block_role in {"system", "user"} for item in node_sum.instances)
@@ -108,4 +108,78 @@ def test_rank_distribution_sorts_by_selected_view_then_instance_id() -> None:
         (1, "sys-1", 3.0),
         (2, "sys-2", 3.0),
         (3, "user-1", 3.0),
+    ]
+
+
+def test_signed_aggregation_views_preserve_direction_and_abs_strength() -> None:
+    trace = make_trace()
+    result = AttributionResult(
+        method_name="gradient",
+        attribution_model_name="tiny-model",
+        execution_model_name="tiny-model",
+        same_model=True,
+        target_id="target-1",
+        token_scores=(-5.0, -2.0, 4.0, 1.0, -3.0, 0.0, 0.0),
+    )
+
+    distributions = aggregate_attribution(trace, result, topk=1)
+    node_sum = by_key(distributions, grain="node", view_name="sum")
+    sys_1 = next(item for item in node_sum.instances if item.instance_id == "sys-1")
+    user_1 = next(item for item in node_sum.instances if item.instance_id == "user-1")
+
+    assert sys_1.views["net_sum"] == -7.0
+    assert sys_1.views["positive_sum"] == 0.0
+    assert sys_1.views["negative_sum"] == -7.0
+    assert sys_1.views["abs_sum"] == 7.0
+    assert sys_1.views["topk_abs_mean"] == 5.0
+    assert user_1.views["net_sum"] == -2.0
+    assert user_1.views["positive_sum"] == 1.0
+    assert user_1.views["negative_sum"] == -3.0
+
+
+def test_signed_distribution_stats_use_abs_mass_without_nan() -> None:
+    trace = make_trace()
+    result = AttributionResult(
+        method_name="gradient",
+        attribution_model_name="tiny-model",
+        execution_model_name="tiny-model",
+        same_model=True,
+        target_id="target-1",
+        token_scores=(-5.0, -2.0, 4.0, 1.0, -3.0, 0.0, 0.0),
+    )
+
+    node_sum = by_key(aggregate_attribution(trace, result), grain="node", view_name="sum")
+
+    assert not math.isnan(node_sum.distribution_stats["entropy"])
+    assert node_sum.distribution_stats["positive_mass"] == pytest.approx(4.0 / 13.0)
+    assert node_sum.distribution_stats["negative_mass"] == pytest.approx(9.0 / 13.0)
+    assert node_sum.distribution_stats["net_direction"] == pytest.approx(-5.0 / 13.0)
+
+
+def test_rank_distribution_can_rank_by_abs_positive_or_negative() -> None:
+    trace = make_trace()
+    result = AttributionResult(
+        method_name="gradient",
+        attribution_model_name="tiny-model",
+        execution_model_name="tiny-model",
+        same_model=True,
+        target_id="target-1",
+        token_scores=(-5.0, -2.0, 4.0, 1.0, -3.0, 0.0, 0.0),
+    )
+    node_sum = by_key(aggregate_attribution(trace, result), grain="node", view_name="sum")
+
+    assert [item.instance.instance_id for item in rank_distribution(node_sum, rank_by="abs")] == [
+        "sys-1",
+        "sys-2",
+        "user-1",
+    ]
+    assert [item.instance.instance_id for item in rank_distribution(node_sum, rank_by="positive")] == [
+        "sys-2",
+        "sys-1",
+        "user-1",
+    ]
+    assert [item.instance.instance_id for item in rank_distribution(node_sum, rank_by="negative")] == [
+        "sys-1",
+        "user-1",
+        "sys-2",
     ]

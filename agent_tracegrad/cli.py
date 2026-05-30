@@ -57,7 +57,7 @@ def build_parser() -> argparse.ArgumentParser:
     _add_target_args(diagnose)
     _add_output_dir_args(diagnose, default_prefix="tracegrad-diagnosis", noun="diagnosis")
     _add_objective_args(diagnose)
-    _add_attribution_args(diagnose)
+    _add_attribution_args(diagnose, default_view="abs_sum")
     diagnose.add_argument("--ablation-k", action="append", type=int, default=None, help="k values for diagnosis ablation.")
     diagnose.add_argument("--control-ablation", action="store_true", help="Also ablate low-ranked control nodes.")
     diagnose.add_argument("--ablation-placeholder", default="[ABLATE]", help="Replacement text for ablated nodes.")
@@ -338,7 +338,7 @@ def _add_output_dir_args(
     parser.add_argument("--output-prefix", default=default_prefix, help="Artifact filename prefix.")
 
 
-def _add_attribution_args(parser: argparse.ArgumentParser) -> None:
+def _add_attribution_args(parser: argparse.ArgumentParser, *, default_view: str = "sum") -> None:
     parser.add_argument(
         "--method",
         choices=("gradient_saliency", "gradient_times_input", "integrated_gradients"),
@@ -351,8 +351,18 @@ def _add_attribution_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--ranking-grain", choices=("node", "sub_block_kind"), default="node")
     parser.add_argument(
         "--ranking-view",
-        choices=("sum", "mean", "length_norm", "topk_mean"),
-        default="sum",
+        choices=(
+            "sum",
+            "mean",
+            "length_norm",
+            "topk_mean",
+            "net_sum",
+            "positive_sum",
+            "negative_sum",
+            "abs_sum",
+            "topk_abs_mean",
+        ),
+        default=default_view,
     )
 
 
